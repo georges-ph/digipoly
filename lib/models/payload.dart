@@ -30,4 +30,7 @@ class Payload {
 
   factory Payload.fromJson(String source) =>
       Payload.fromMap(json.decode(source));
+
+  @override
+  String toString() => 'Payload(type: $type, data: $data)';
 }

@@ -139,13 +139,9 @@ class _HomeScreenState extends State<HomeScreen> {
     socketType = SocketType.server;
     server = Server();
 
-    // must listen to stream before sending events
-    server.stream.listen(print);
-    server.infoStream.map((event) => "Info: $event").listen(print);
-    server.errorStream.map((event) => "Error: $event").listen(print);
-
     final started = await server.startServer(address);
     if (!started) return;
+    server.stream.listen(print);
 
     players.players.add(
       Player(
@@ -183,12 +179,9 @@ class _HomeScreenState extends State<HomeScreen> {
     socketType = SocketType.client;
     client = Client();
 
-    client.stream.listen(print);
-    client.infoStream.map((event) => "Info: $event").listen(print);
-    client.errorStream.map((event) => "Error: $event").listen(print);
-
     final connected = await client.connect(_addressController.text.trim());
     if (!connected) return;
+    client.stream.listen(print);
 
     Payload payload = Payload(
       type: Payloadtype.player,

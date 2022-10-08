@@ -8,7 +8,7 @@ import 'package:digipoly/models/payment.dart';
 import 'package:digipoly/models/player.dart';
 import 'package:digipoly/models/players.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+import 'package:flutter/scheduler.dart';
 
 class PlayersScreen extends StatefulWidget {
   const PlayersScreen({super.key});
@@ -35,42 +35,18 @@ class _PlayersScreenState extends State<PlayersScreen> {
     } else if (socketType == SocketType.client) {
       client.disconnect();
     }
-
     socketType = SocketType.none;
     super.dispose();
   }
 
   void _listeners() {
-
-    
-
     if (socketType == SocketType.server) {
       _balance = startingAmount;
       _players = players;
-      print('''
-initially:
-_players: $_players
-players: $players
-''');
 
-      server.socketLeft = (port) {
-        print('''
-before removing:
-_players: $_players
-players: $players
-''');
+      server.onSocketDone = (port) {
         players.players.removeWhere((element) => element.port == port);
-        print('''
-while removing:
-_players: $_players
-players: $players
-''');
         _players = players;
-        print('''
-after removing:
-_players: $_players
-players: $players
-''');
         setState(() {});
 
         Payload playersPayload = Payload(
@@ -86,50 +62,13 @@ players: $players
 
         if (payload.type == Payloadtype.player) {
           Player player = Player.fromJson(payload.data);
-print('''
-before adding:
-_players: $_players
-players: $players
-''');
 
-        final tempPlayer = players.players.where((element) => element.port==player.port);
-        if (tempPlayer.isEmpty) {
-     players.players.add(player);
-            print('''
-while adding:
-_players: $_players
-players: $players
-''');
+          final tempPlayer =
+              players.players.where((element) => element.port == player.port);
+          if (tempPlayer.isEmpty) {
+            players.players.add(player);
             _players = players;
-            print('''
-after adding:
-_players: $_players
-players: $players
-''');
             setState(() {});
-        }
-
-//           if (!players.players.contains(player)) {
-//             players.players.add(player);
-//             print('''
-// while adding:
-// _players: $_players
-// players: $players
-// ''');
-//             _players = players;
-//             print('''
-// after adding:
-// _players: $_players
-// players: $players
-// ''');
-//             setState(() {});
-//           }
-          else {
-            print('''
-cant add; already exists:
-_players: $_players
-players: $players
-''');
           }
 
           Payload playersPayload = Payload(
@@ -140,7 +79,6 @@ players: $players
           Payload amountPayload = Payload(
             type: Payloadtype.payment,
             data: Payment(
-              fromPort: 0,
               toPort: 0,
               amount: startingAmount,
             ),
@@ -149,21 +87,27 @@ players: $players
           server.broadcast(playersPayload.toJson());
 
           Future.delayed(
-            Duration(seconds: 2),
+            Duration(seconds: 1),
             () => server.sendTo(player.port, amountPayload.toJson()),
           );
         } else if (payload.type == Payloadtype.payment) {
           Payment payment = Payment.fromJson(payload.data);
-          server.sendTo(payment.toPort, payment.amount.toString());
+          if (payment.toPort != server.port) {
+            server.sendTo(payment.toPort, payload.toJson());
+          } else {
+            _balance += payment.amount;
+            setState(() {});
+          }
         }
       });
-
-      server.infoStream.map((event) => "Info: $event").listen(print);
-      server.errorStream.map((event) => "Error: $event").listen(print);
     } else if (socketType == SocketType.client) {
-      client.stream.listen((event) {
-        print("event: $event");
+      client.onSocketDone = () {
+        SchedulerBinding.instance.addPostFrameCallback((_) {
+          Navigator.pop(context);
+        });
+      };
 
+      client.stream.listen((event) {
         Payload payload = Payload.fromJson(event);
 
         if (payload.type == Payloadtype.players) {
@@ -171,15 +115,10 @@ players: $players
           setState(() {});
         } else if (payload.type == Payloadtype.payment) {
           Payment payment = Payment.fromJson(payload.data);
-          // if (payment.fromPort == 0 && payment.toPort == 0) {
           _balance += payment.amount;
           setState(() {});
-          // }
         }
       });
-
-      client.infoStream.map((event) => "Info: $event").listen(print);
-      client.errorStream.map((event) => "Error: $event").listen(print);
     }
   }
 
@@ -242,24 +181,8 @@ players: $players
                       ),
                       OutlinedButton.icon(
                         onPressed: () {
-                          Payment payment = Payment(
-                            fromPort: socketType == SocketType.client
-                                ? client.port
-                                : server.port,
-                            toPort: player.port,
-                            amount: num.parse(controller.text.trim()),
-                          );
-
-                          Payload payload = Payload(
-                            type: Payloadtype.payment,
-                            data: payment,
-                          );
-
-                          if (socketType == SocketType.client) {
-                            client.send(payload.toJson());
-                          } else if (socketType == SocketType.server) {
-                            server.sendTo(payment.toPort, payload.toJson());
-                          }
+                          _sendPayment(
+                              player.port, num.parse(controller.text.trim()));
                         },
                         icon: Icon(Icons.send),
                         label: Text("Send"),
@@ -271,13 +194,25 @@ players: $players
         separatorBuilder: (BuildContext context, int index) =>
             SizedBox(height: 16),
       ),
-      floatingActionButton: socketType == SocketType.client
-          ? null
-          : FloatingActionButton(
-              onPressed: () {},
-              tooltip: "Start",
-              child: Icon(Icons.play_arrow),
-            ),
     );
+  }
+
+  void _sendPayment(int port, num amount) {
+    _balance -= amount;
+    setState(() {});
+
+    Payload payload = Payload(
+      type: Payloadtype.payment,
+      data: Payment(
+        toPort: port,
+        amount: amount,
+      ),
+    );
+
+    if (socketType == SocketType.client) {
+      client.send(payload.toJson());
+    } else if (socketType == SocketType.server) {
+      server.sendTo(port, payload.toJson());
+    }
   }
 }
