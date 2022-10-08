@@ -1,5 +1,6 @@
 // ignore_for_file: prefer_const_constructors
 
+import 'package:digipoly/screens/home_screen.dart';
 import 'package:flutter/material.dart';
 
 void main() {
@@ -11,6 +12,14 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp();
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      home: HomeScreen(),
+      title: "Digipoly",
+      theme: ThemeData(
+        visualDensity: VisualDensity.standard,
+        materialTapTargetSize: MaterialTapTargetSize.padded,
+      ),
+    );
   }
 }
