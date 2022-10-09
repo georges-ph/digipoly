@@ -187,19 +187,25 @@ class _PlayersScreenState extends State<PlayersScreen> {
             ),
             Row(
               children: [
-                OutlinedButton.icon(
-                  onPressed: () {
-                    _payBank(num.parse(controller.text.trim()));
-                  },
-                  icon: Icon(Icons.send),
-                  label: Text("Pay"),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: () {
+                      _payBank(num.parse(controller.text.trim()));
+                      controller.clear();
+                    },
+                    icon: Icon(Icons.file_upload),
+                    label: Text("Pay"),
+                  ),
                 ),
-                OutlinedButton.icon(
-                  onPressed: () {
-                    _collectBank(num.parse(controller.text.trim()));
-                  },
-                  icon: Icon(Icons.send), // TODO: change icon
-                  label: Text("Collect"),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: () {
+                      _collectBank(num.parse(controller.text.trim()));
+                      controller.clear();
+                    },
+                    icon: Icon(Icons.file_download),
+                    label: Text("Collect"),
+                  ),
                 ),
               ],
             ),
@@ -209,8 +215,8 @@ class _PlayersScreenState extends State<PlayersScreen> {
     );
   }
 
-  void _addPlayers(Players _playerss) {
-    for (var player in _playerss.players) {
+  void _addPlayers(Players players) {
+    for (var player in players.players) {
       TextEditingController controller = TextEditingController();
       _widgets.add(
         Card(
@@ -235,13 +241,17 @@ class _PlayersScreenState extends State<PlayersScreen> {
                         hintText: "Enter amount to pay",
                       ),
                     ),
-                    OutlinedButton.icon(
-                      onPressed: () {
-                        _sendPayment(
-                            player.port, num.parse(controller.text.trim()));
-                      },
-                      icon: Icon(Icons.send),
-                      label: Text("Send"),
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: () {
+                          _sendPayment(
+                              player.port, num.parse(controller.text.trim()));
+                          controller.clear();
+                        },
+                        icon: Icon(Icons.send),
+                        label: Text("Send"),
+                      ),
                     ),
                   ],
           ),
