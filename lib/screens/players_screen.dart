@@ -45,12 +45,20 @@ class _PlayersScreenState extends State<PlayersScreen> {
       _balance = startingAmount;
       _players = players;
 
-      _reloadWidgets();
+      // _reloadWidgets();
+      _widgets.clear();
+      _addServerRunningText();
+      _addBank();
+      _addPlayers(_players);
 
       server.onSocketDone = (port) {
         players.players.removeWhere((element) => element.port == port);
         _players = players;
-        _reloadWidgets();
+        // _reloadWidgets();
+        _widgets.clear();
+        _addServerRunningText();
+        _addBank();
+        _addPlayers(_players);
         setState(() {});
 
         Payload playersPayload = Payload(
@@ -72,7 +80,11 @@ class _PlayersScreenState extends State<PlayersScreen> {
           if (tempPlayer.isEmpty) {
             players.players.add(player);
             _players = players;
-            _reloadWidgets();
+            // _reloadWidgets();
+            _widgets.clear();
+            _addServerRunningText();
+            _addBank();
+            _addPlayers(_players);
             setState(() {});
           }
 
@@ -92,7 +104,7 @@ class _PlayersScreenState extends State<PlayersScreen> {
           server.broadcast(playersPayload.toJson());
 
           Future.delayed(
-            Duration(seconds: 1),
+            Duration(seconds: 2),
             () => server.sendTo(player.port, amountPayload.toJson()),
           );
         } else if (payload.type == Payloadtype.payment) {
@@ -112,14 +124,20 @@ class _PlayersScreenState extends State<PlayersScreen> {
         });
       };
 
-      _reloadWidgets();
+      // _reloadWidgets();
+      _widgets.clear();
+      _addBank();
+      _addPlayers(_players);
 
       client.stream.listen((event) {
         Payload payload = Payload.fromJson(event);
 
         if (payload.type == Payloadtype.players) {
           _players = Players.fromJson(payload.data);
-          _reloadWidgets();
+          // _reloadWidgets();
+          _widgets.clear();
+          _addBank();
+          _addPlayers(_players);
           setState(() {});
         } else if (payload.type == Payloadtype.payment) {
           Payment payment = Payment.fromJson(payload.data);
@@ -130,14 +148,14 @@ class _PlayersScreenState extends State<PlayersScreen> {
     }
   }
 
-  void _reloadWidgets() {
+  /* void _reloadWidgets() {
     _widgets.clear();
     if (socketType == SocketType.server) {
       _addServerRunningText();
     }
     _addBank();
     _addPlayers();
-  }
+  } */
 
   void _addServerRunningText() {
     _widgets.add(
@@ -179,49 +197,44 @@ class _PlayersScreenState extends State<PlayersScreen> {
     );
   }
 
-  void _addPlayers() {
-    for (var player in _players.players) {
+  void _addPlayers(Players _playerss) {
+    for (var player in _playerss.players) {
       TextEditingController controller = TextEditingController();
-
-      var card = Card(
-        margin: EdgeInsets.zero,
-        child: ExpansionTile(
-          title: Text(player.name),
-          subtitle: Text("port: ${player.port}"),
-          expandedCrossAxisAlignment: CrossAxisAlignment.start,
-          childrenPadding: EdgeInsets.symmetric(
-            horizontal: 16,
-          ),
-          children: ((socketType == SocketType.client &&
-                      player.port == client.port) ||
-                  (socketType == SocketType.server &&
-                      player.port == server.port))
-              ? [Container()]
-              : [
-                  TextField(
-                    controller: controller,
-                    keyboardType: TextInputType.number,
-                    decoration: InputDecoration(
-                      hintText: "Enter amount to pay",
+      _widgets.add(
+        Card(
+          margin: EdgeInsets.zero,
+          child: ExpansionTile(
+            title: Text(player.name),
+            subtitle: Text("port: ${player.port}"),
+            expandedCrossAxisAlignment: CrossAxisAlignment.start,
+            childrenPadding: EdgeInsets.symmetric(
+              horizontal: 16,
+            ),
+            children: ((socketType == SocketType.client &&
+                        player.port == client.port) ||
+                    (socketType == SocketType.server &&
+                        player.port == server.port))
+                ? [Container()]
+                : [
+                    TextField(
+                      controller: controller,
+                      keyboardType: TextInputType.number,
+                      decoration: InputDecoration(
+                        hintText: "Enter amount to pay",
+                      ),
                     ),
-                  ),
-                  OutlinedButton.icon(
-                    onPressed: () {
-                      // _sendPayment(
-                      //     player.port, num.parse(controller.text.trim()));
-                    },
-                    icon: Icon(Icons.send),
-                    label: Text("Send"),
-                  ),
-                ],
+                    OutlinedButton.icon(
+                      onPressed: () {
+                        // _sendPayment(
+                        //     player.port, num.parse(controller.text.trim()));
+                      },
+                      icon: Icon(Icons.send),
+                      label: Text("Send"),
+                    ),
+                  ],
+          ),
         ),
       );
-
-      if (!_widgets.contains(card)) {
-        _widgets.add(
-          card,
-        );
-      }
     }
   }
 
