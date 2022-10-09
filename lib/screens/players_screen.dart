@@ -20,6 +20,7 @@ class PlayersScreen extends StatefulWidget {
 class _PlayersScreenState extends State<PlayersScreen> {
   num _balance = 0;
   Players _players = Players(players: []);
+  List<Widget> _widgets = [];
 
   @override
   void initState() {
@@ -44,9 +45,12 @@ class _PlayersScreenState extends State<PlayersScreen> {
       _balance = startingAmount;
       _players = players;
 
+      _reloadWidgets();
+
       server.onSocketDone = (port) {
         players.players.removeWhere((element) => element.port == port);
         _players = players;
+        _reloadWidgets();
         setState(() {});
 
         Payload playersPayload = Payload(
@@ -68,6 +72,7 @@ class _PlayersScreenState extends State<PlayersScreen> {
           if (tempPlayer.isEmpty) {
             players.players.add(player);
             _players = players;
+            _reloadWidgets();
             setState(() {});
           }
 
@@ -107,11 +112,14 @@ class _PlayersScreenState extends State<PlayersScreen> {
         });
       };
 
+      _reloadWidgets();
+
       client.stream.listen((event) {
         Payload payload = Payload.fromJson(event);
 
         if (payload.type == Payloadtype.players) {
           _players = Players.fromJson(payload.data);
+          _reloadWidgets();
           setState(() {});
         } else if (payload.type == Payloadtype.payment) {
           Payment payment = Payment.fromJson(payload.data);
@@ -119,6 +127,101 @@ class _PlayersScreenState extends State<PlayersScreen> {
           setState(() {});
         }
       });
+    }
+  }
+
+  void _reloadWidgets() {
+    _widgets.clear();
+    if (socketType == SocketType.server) {
+      _addServerRunningText();
+    }
+    _addBank();
+    _addPlayers();
+  }
+
+  void _addServerRunningText() {
+    _widgets.add(
+      Text(
+        "Server running on ${server.address}",
+      ),
+    );
+  }
+
+  void _addBank() {
+    _widgets.add(
+      Card(
+        margin: EdgeInsets.zero,
+        child: ExpansionTile(
+          title: Text("Bank"),
+          expandedCrossAxisAlignment: CrossAxisAlignment.start,
+          childrenPadding: EdgeInsets.symmetric(
+            horizontal: 16,
+          ),
+          children: [
+            TextField(
+              // controller: controller,
+              keyboardType: TextInputType.number,
+              decoration: InputDecoration(
+                hintText: "Enter amount to pay",
+              ),
+            ),
+            OutlinedButton.icon(
+              onPressed: () {
+                // _sendPayment(
+                //     player.port, num.parse(controller.text.trim()));
+              },
+              icon: Icon(Icons.send),
+              label: Text("Send"),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _addPlayers() {
+    for (var player in _players.players) {
+      TextEditingController controller = TextEditingController();
+
+      var card = Card(
+        margin: EdgeInsets.zero,
+        child: ExpansionTile(
+          title: Text(player.name),
+          subtitle: Text("port: ${player.port}"),
+          expandedCrossAxisAlignment: CrossAxisAlignment.start,
+          childrenPadding: EdgeInsets.symmetric(
+            horizontal: 16,
+          ),
+          children: ((socketType == SocketType.client &&
+                      player.port == client.port) ||
+                  (socketType == SocketType.server &&
+                      player.port == server.port))
+              ? [Container()]
+              : [
+                  TextField(
+                    controller: controller,
+                    keyboardType: TextInputType.number,
+                    decoration: InputDecoration(
+                      hintText: "Enter amount to pay",
+                    ),
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: () {
+                      // _sendPayment(
+                      //     player.port, num.parse(controller.text.trim()));
+                    },
+                    icon: Icon(Icons.send),
+                    label: Text("Send"),
+                  ),
+                ],
+        ),
+      );
+
+      if (!_widgets.contains(card)) {
+        _widgets.add(
+          card,
+        );
+      }
     }
   }
 
@@ -141,55 +244,9 @@ class _PlayersScreenState extends State<PlayersScreen> {
       ),
       body: ListView.separated(
         padding: EdgeInsets.all(24),
-        itemCount: socketType == SocketType.client
-            ? _players.players.length
-            : _players.players.length + 1,
+        itemCount: _widgets.length,
         itemBuilder: (context, index) {
-          if ((socketType == SocketType.server) && (index == 0)) {
-            return Text(
-              "Server running on ${server.address}",
-              style: Theme.of(context).textTheme.titleMedium,
-            );
-          }
-
-          if (socketType == SocketType.server) index = index - 1;
-
-          Player player = _players.players.elementAt(index);
-          TextEditingController controller = TextEditingController();
-
-          return Card(
-            margin: EdgeInsets.zero,
-            child: ExpansionTile(
-              title: Text(player.name),
-              subtitle: Text("port: ${player.port}"),
-              expandedCrossAxisAlignment: CrossAxisAlignment.start,
-              childrenPadding: EdgeInsets.symmetric(
-                horizontal: 16,
-              ),
-              children: ((socketType == SocketType.client &&
-                          player.port == client.port) ||
-                      (socketType == SocketType.server &&
-                          player.port == server.port))
-                  ? [Container()]
-                  : [
-                      TextField(
-                        controller: controller,
-                        keyboardType: TextInputType.number,
-                        decoration: InputDecoration(
-                          hintText: "Enter amount to pay",
-                        ),
-                      ),
-                      OutlinedButton.icon(
-                        onPressed: () {
-                          _sendPayment(
-                              player.port, num.parse(controller.text.trim()));
-                        },
-                        icon: Icon(Icons.send),
-                        label: Text("Send"),
-                      ),
-                    ],
-            ),
-          );
+          return _widgets.elementAt(index);
         },
         separatorBuilder: (BuildContext context, int index) =>
             SizedBox(height: 16),
