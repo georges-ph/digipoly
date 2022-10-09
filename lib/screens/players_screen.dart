@@ -166,6 +166,8 @@ class _PlayersScreenState extends State<PlayersScreen> {
   }
 
   void _addBank() {
+    TextEditingController controller = TextEditingController();
+
     _widgets.add(
       Card(
         margin: EdgeInsets.zero,
@@ -177,19 +179,29 @@ class _PlayersScreenState extends State<PlayersScreen> {
           ),
           children: [
             TextField(
-              // controller: controller,
+              controller: controller,
               keyboardType: TextInputType.number,
               decoration: InputDecoration(
                 hintText: "Enter amount to pay",
               ),
             ),
-            OutlinedButton.icon(
-              onPressed: () {
-                // _sendPayment(
-                //     player.port, num.parse(controller.text.trim()));
-              },
-              icon: Icon(Icons.send),
-              label: Text("Send"),
+            Row(
+              children: [
+                OutlinedButton.icon(
+                  onPressed: () {
+                    _payBank(num.parse(controller.text.trim()));
+                  },
+                  icon: Icon(Icons.send),
+                  label: Text("Pay"),
+                ),
+                OutlinedButton.icon(
+                  onPressed: () {
+                    _collectBank(num.parse(controller.text.trim()));
+                  },
+                  icon: Icon(Icons.send), // TODO: change icon
+                  label: Text("Collect"),
+                ),
+              ],
             ),
           ],
         ),
@@ -225,8 +237,8 @@ class _PlayersScreenState extends State<PlayersScreen> {
                     ),
                     OutlinedButton.icon(
                       onPressed: () {
-                        // _sendPayment(
-                        //     player.port, num.parse(controller.text.trim()));
+                        _sendPayment(
+                            player.port, num.parse(controller.text.trim()));
                       },
                       icon: Icon(Icons.send),
                       label: Text("Send"),
@@ -285,4 +297,16 @@ class _PlayersScreenState extends State<PlayersScreen> {
       server.sendTo(port, payload.toJson());
     }
   }
+
+  void _payBank(num amount) {
+    _balance -= amount;
+    setState(() {});
+  }
+
+  void _collectBank(num amount) {
+    _balance += amount;
+    setState(() {});
+  }
 }
+
+// TODO: maybe better to lose focus on text fields and reset controllers text
