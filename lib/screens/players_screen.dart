@@ -1,5 +1,3 @@
-// ignore_for_file: prefer_const_constructors, prefer_const_literals_to_create_immutables
-
 import 'package:digipoly/enums/payload_type.dart';
 import 'package:digipoly/enums/socket_type.dart';
 import 'package:digipoly/globals.dart';
@@ -20,7 +18,7 @@ class PlayersScreen extends StatefulWidget {
 class _PlayersScreenState extends State<PlayersScreen> {
   num _balance = 0;
   Players _players = Players(players: []);
-  List<Widget> _widgets = [];
+  final List<Widget> _widgets = [];
 
   @override
   void initState() {
@@ -69,54 +67,60 @@ class _PlayersScreenState extends State<PlayersScreen> {
         server.broadcast(playersPayload.toJson());
       };
 
-      server.stream.listen((event) {
-        Payload payload = Payload.fromJson(event);
+      server.stream.listen(
+        (event) {
+          Payload payload = Payload.fromJson(event);
 
-        if (payload.type == Payloadtype.player) {
-          Player player = Player.fromJson(payload.data);
+          if (payload.type == Payloadtype.player) {
+            Player player = Player.fromJson(payload.data);
 
-          final tempPlayer =
-              players.players.where((element) => element.port == player.port);
-          if (tempPlayer.isEmpty) {
-            players.players.add(player);
-            _players = players;
-            // _reloadWidgets();
-            _widgets.clear();
-            _addServerRunningText();
-            _addBank();
-            _addPlayers(_players);
-            setState(() {});
+            final tempPlayer =
+                players.players.where((element) => element.port == player.port);
+            if (tempPlayer.isEmpty) {
+              players.players.add(player);
+              _players = players;
+              // _reloadWidgets();
+              _widgets.clear();
+              _addServerRunningText();
+              _addBank();
+              _addPlayers(_players);
+              setState(() {});
+            }
+
+            Payload playersPayload = Payload(
+              type: Payloadtype.players,
+              data: players,
+            );
+
+            Payload amountPayload = Payload(
+              type: Payloadtype.payment,
+              data: Payment(
+                toPort: 0,
+                amount: startingAmount,
+              ),
+            );
+
+            server.broadcast(playersPayload.toJson());
+
+            Future.delayed(
+              const Duration(seconds: 2),
+              () => server.sendTo(player.port, amountPayload.toJson()),
+            );
+          } else if (payload.type == Payloadtype.payment) {
+            Payment payment = Payment.fromJson(payload.data);
+            if (payment.toPort != server.port) {
+              server.sendTo(payment.toPort, payload.toJson());
+            } else {
+              _balance += payment.amount;
+              setState(() {});
+            }
           }
-
-          Payload playersPayload = Payload(
-            type: Payloadtype.players,
-            data: players,
-          );
-
-          Payload amountPayload = Payload(
-            type: Payloadtype.payment,
-            data: Payment(
-              toPort: 0,
-              amount: startingAmount,
-            ),
-          );
-
-          server.broadcast(playersPayload.toJson());
-
-          Future.delayed(
-            Duration(seconds: 2),
-            () => server.sendTo(player.port, amountPayload.toJson()),
-          );
-        } else if (payload.type == Payloadtype.payment) {
-          Payment payment = Payment.fromJson(payload.data);
-          if (payment.toPort != server.port) {
-            server.sendTo(payment.toPort, payload.toJson());
-          } else {
-            _balance += payment.amount;
-            setState(() {});
-          }
-        }
-      });
+        },
+        onError: (error) {
+          SnackBar snackBar = SnackBar(content: Text(error.toString()));
+          ScaffoldMessenger.of(context).showSnackBar(snackBar);
+        },
+      );
     } else if (socketType == SocketType.client) {
       client.onSocketDone = () {
         SchedulerBinding.instance.addPostFrameCallback((_) {
@@ -129,22 +133,28 @@ class _PlayersScreenState extends State<PlayersScreen> {
       _addBank();
       _addPlayers(_players);
 
-      client.stream.listen((event) {
-        Payload payload = Payload.fromJson(event);
+      client.stream.listen(
+        (event) {
+          Payload payload = Payload.fromJson(event);
 
-        if (payload.type == Payloadtype.players) {
-          _players = Players.fromJson(payload.data);
-          // _reloadWidgets();
-          _widgets.clear();
-          _addBank();
-          _addPlayers(_players);
-          setState(() {});
-        } else if (payload.type == Payloadtype.payment) {
-          Payment payment = Payment.fromJson(payload.data);
-          _balance += payment.amount;
-          setState(() {});
-        }
-      });
+          if (payload.type == Payloadtype.players) {
+            _players = Players.fromJson(payload.data);
+            // _reloadWidgets();
+            _widgets.clear();
+            _addBank();
+            _addPlayers(_players);
+            setState(() {});
+          } else if (payload.type == Payloadtype.payment) {
+            Payment payment = Payment.fromJson(payload.data);
+            _balance += payment.amount;
+            setState(() {});
+          }
+        },
+        onError: (error) {
+          SnackBar snackBar = SnackBar(content: Text(error.toString()));
+          ScaffoldMessenger.of(context).showSnackBar(snackBar);
+        },
+      );
     }
   }
 
@@ -172,16 +182,16 @@ class _PlayersScreenState extends State<PlayersScreen> {
       Card(
         margin: EdgeInsets.zero,
         child: ExpansionTile(
-          title: Text("Bank"),
+          title: const Text("Bank"),
           expandedCrossAxisAlignment: CrossAxisAlignment.start,
-          childrenPadding: EdgeInsets.symmetric(
+          childrenPadding: const EdgeInsets.symmetric(
             horizontal: 16,
           ),
           children: [
             TextField(
               controller: controller,
               keyboardType: TextInputType.number,
-              decoration: InputDecoration(
+              decoration: const InputDecoration(
                 hintText: "Enter amount to pay",
               ),
             ),
@@ -193,8 +203,8 @@ class _PlayersScreenState extends State<PlayersScreen> {
                       _payBank(num.parse(controller.text.trim()));
                       controller.clear();
                     },
-                    icon: Icon(Icons.file_upload),
-                    label: Text("Pay"),
+                    icon: const Icon(Icons.file_upload),
+                    label: const Text("Pay"),
                   ),
                 ),
                 Expanded(
@@ -203,8 +213,8 @@ class _PlayersScreenState extends State<PlayersScreen> {
                       _collectBank(num.parse(controller.text.trim()));
                       controller.clear();
                     },
-                    icon: Icon(Icons.file_download),
-                    label: Text("Collect"),
+                    icon: const Icon(Icons.file_download),
+                    label: const Text("Collect"),
                   ),
                 ),
               ],
@@ -225,7 +235,7 @@ class _PlayersScreenState extends State<PlayersScreen> {
             title: Text(player.name),
             subtitle: Text("port: ${player.port}"),
             expandedCrossAxisAlignment: CrossAxisAlignment.start,
-            childrenPadding: EdgeInsets.symmetric(
+            childrenPadding: const EdgeInsets.symmetric(
               horizontal: 16,
             ),
             children: ((socketType == SocketType.client &&
@@ -237,7 +247,7 @@ class _PlayersScreenState extends State<PlayersScreen> {
                     TextField(
                       controller: controller,
                       keyboardType: TextInputType.number,
-                      decoration: InputDecoration(
+                      decoration: const InputDecoration(
                         hintText: "Enter amount to pay",
                       ),
                     ),
@@ -249,8 +259,8 @@ class _PlayersScreenState extends State<PlayersScreen> {
                               player.port, num.parse(controller.text.trim()));
                           controller.clear();
                         },
-                        icon: Icon(Icons.send),
-                        label: Text("Send"),
+                        icon: const Icon(Icons.send),
+                        label: const Text("Send"),
                       ),
                     ),
                   ],
@@ -264,13 +274,13 @@ class _PlayersScreenState extends State<PlayersScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text("Players"),
+        title: const Text("Players"),
         actions: [
           TextButton(
             onPressed: null,
             child: Text(
               "Balance: $_balance",
-              style: TextStyle(
+              style: const TextStyle(
                 color: Colors.white,
               ),
             ),
@@ -278,13 +288,13 @@ class _PlayersScreenState extends State<PlayersScreen> {
         ],
       ),
       body: ListView.separated(
-        padding: EdgeInsets.all(24),
+        padding: const EdgeInsets.all(24),
         itemCount: _widgets.length,
         itemBuilder: (context, index) {
           return _widgets.elementAt(index);
         },
         separatorBuilder: (BuildContext context, int index) =>
-            SizedBox(height: 16),
+            const SizedBox(height: 16),
       ),
     );
   }

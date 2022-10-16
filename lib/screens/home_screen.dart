@@ -1,13 +1,12 @@
-// ignore_for_file: prefer_const_constructors, prefer_const_literals_to_create_immutables, use_build_context_synchronously
+// ignore_for_file: use_build_context_synchronously, avoid_print
 
+import 'package:client_server_sockets/client_server_sockets.dart';
 import 'package:digipoly/enums/payload_type.dart';
 import 'package:digipoly/enums/socket_type.dart';
 import 'package:digipoly/globals.dart';
 import 'package:digipoly/models/payload.dart';
 import 'package:digipoly/models/player.dart';
 import 'package:digipoly/screens/players_screen.dart';
-import 'package:digipoly/services/client.dart';
-import 'package:digipoly/services/server.dart';
 import 'package:flutter/material.dart';
 import 'package:network_info_plus/network_info_plus.dart';
 
@@ -22,9 +21,9 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _createVisibility = false;
   bool _joinVisibility = false;
 
-  TextEditingController _nameController = TextEditingController();
-  TextEditingController _amountController = TextEditingController();
-  TextEditingController _addressController = TextEditingController();
+  final TextEditingController _nameController = TextEditingController();
+  final TextEditingController _amountController = TextEditingController();
+  final TextEditingController _addressController = TextEditingController();
 
   @override
   void dispose() {
@@ -38,11 +37,11 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text("Digipoly"),
+        title: const Text("Digipoly"),
       ),
       body: Center(
         child: SingleChildScrollView(
-          padding: EdgeInsets.all(24),
+          padding: const EdgeInsets.all(24),
           child: Column(
             children: [
               Visibility(
@@ -50,7 +49,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 child: TextField(
                   controller: _nameController,
                   textCapitalization: TextCapitalization.words,
-                  decoration: InputDecoration(
+                  decoration: const InputDecoration(
                     labelText: "Enter your name",
                     hintText: "John",
                   ),
@@ -59,13 +58,13 @@ class _HomeScreenState extends State<HomeScreen> {
               Visibility(
                 visible: _createVisibility,
                 child: Padding(
-                  padding: EdgeInsets.symmetric(
+                  padding: const EdgeInsets.symmetric(
                     vertical: 16,
                   ),
                   child: TextField(
                     controller: _amountController,
                     keyboardType: TextInputType.number,
-                    decoration: InputDecoration(
+                    decoration: const InputDecoration(
                       labelText: "Enter starting amount",
                       hintText: "100",
                     ),
@@ -74,19 +73,19 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
               ElevatedButton(
                 onPressed: _createRoom,
-                child: Text("Create room"),
+                child: const Text("Create room"),
               ),
               Visibility(
                 visible: _joinVisibility,
                 child: Padding(
-                  padding: EdgeInsets.symmetric(
+                  padding: const EdgeInsets.symmetric(
                     vertical: 16,
                   ),
                   child: TextField(
                     controller: _nameController,
                     textInputAction: TextInputAction.next,
                     textCapitalization: TextCapitalization.words,
-                    decoration: InputDecoration(
+                    decoration: const InputDecoration(
                       labelText: "Enter your name",
                       hintText: "John",
                     ),
@@ -96,13 +95,13 @@ class _HomeScreenState extends State<HomeScreen> {
               Visibility(
                 visible: _joinVisibility,
                 child: Padding(
-                  padding: EdgeInsets.only(
+                  padding: const EdgeInsets.only(
                     bottom: 16,
                   ),
                   child: TextField(
                     controller: _addressController,
                     keyboardType: TextInputType.number,
-                    decoration: InputDecoration(
+                    decoration: const InputDecoration(
                       labelText: "Enter server address",
                       hintText: "192.168.1.1",
                     ),
@@ -111,7 +110,7 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
               ElevatedButton(
                 onPressed: _joinRoom,
-                child: Text("Join room"),
+                child: const Text("Join room"),
               ),
             ],
           ),
@@ -125,14 +124,16 @@ class _HomeScreenState extends State<HomeScreen> {
       setState(() {
         _createVisibility = true;
       });
-      SnackBar snackBar = SnackBar(content: Text("Fill out both fields"));
+      SnackBar snackBar = const SnackBar(content: Text("Fill out both fields"));
       ScaffoldMessenger.of(context).showSnackBar(snackBar);
       return;
     }
 
     String? address = await wifiIp();
     if (address == null) {
-      // TODO: handle this
+      SnackBar snackBar = const SnackBar(
+          content: Text("Could not get IP address. Check your WiFi"));
+      ScaffoldMessenger.of(context).showSnackBar(snackBar);
       return;
     }
 
@@ -141,7 +142,13 @@ class _HomeScreenState extends State<HomeScreen> {
 
     final started = await server.startServer(address);
     if (!started) return;
-    server.stream.listen(print);
+    server.stream.listen(
+      print,
+      onError: (error) {
+        SnackBar snackBar = SnackBar(content: Text(error.toString()));
+        ScaffoldMessenger.of(context).showSnackBar(snackBar);
+      },
+    );
 
     players.players.add(
       Player(
@@ -155,7 +162,7 @@ class _HomeScreenState extends State<HomeScreen> {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (context) => PlayersScreen(),
+        builder: (context) => const PlayersScreen(),
       ),
     );
   }
@@ -165,14 +172,8 @@ class _HomeScreenState extends State<HomeScreen> {
       setState(() {
         _joinVisibility = true;
       });
-      SnackBar snackBar = SnackBar(content: Text("Fill out both field"));
+      SnackBar snackBar = const SnackBar(content: Text("Fill out both field"));
       ScaffoldMessenger.of(context).showSnackBar(snackBar);
-      return;
-    }
-
-    String? address = await wifiIp();
-    if (address == null) {
-      // TODO: handle this
       return;
     }
 
@@ -181,7 +182,13 @@ class _HomeScreenState extends State<HomeScreen> {
 
     final connected = await client.connect(_addressController.text.trim());
     if (!connected) return;
-    client.stream.listen(print);
+    client.stream.listen(
+      print,
+      onError: (error) {
+        SnackBar snackBar = SnackBar(content: Text(error.toString()));
+        ScaffoldMessenger.of(context).showSnackBar(snackBar);
+      },
+    );
 
     Payload payload = Payload(
       type: Payloadtype.player,
@@ -196,7 +203,7 @@ class _HomeScreenState extends State<HomeScreen> {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (context) => PlayersScreen(),
+        builder: (context) => const PlayersScreen(),
       ),
     );
   }
@@ -206,8 +213,6 @@ class _HomeScreenState extends State<HomeScreen> {
     final wifiIp = await networkInfo.getWifiIP();
 
     if (wifiIp == null) {
-      // TODO: handle this
-      // maybe retry and if not working either use any ip or provide a way to manually enter one
       return null;
     }
 

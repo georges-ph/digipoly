@@ -1,4 +1,3 @@
-// ignore_for_file: prefer_const_constructors
 
 import 'package:digipoly/screens/home_screen.dart';
 import 'package:flutter/material.dart';
@@ -14,7 +13,7 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      home: HomeScreen(),
+      home: const HomeScreen(),
       title: "Digipoly",
       theme: ThemeData(
         visualDensity: VisualDensity.standard,

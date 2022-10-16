@@ -1,7 +1,6 @@
+import 'package:client_server_sockets/client_server_sockets.dart';
 import 'package:digipoly/enums/socket_type.dart';
 import 'package:digipoly/models/players.dart';
-import 'package:digipoly/services/client.dart';
-import 'package:digipoly/services/server.dart';
 
 late Server server;
 late Client client;
