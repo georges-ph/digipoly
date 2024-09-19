@@ -1,6 +1,6 @@
 import 'dart:convert';
 
-import 'package:digipoly/models/player.dart';
+import 'player.dart';
 
 class Players {
   final List<Player> players;
@@ -10,21 +10,24 @@ class Players {
   });
 
   Map<String, dynamic> toMap() {
-    return {
+    return <String, dynamic>{
       'players': players.map((x) => x.toMap()).toList(),
     };
   }
 
   factory Players.fromMap(Map<String, dynamic> map) {
     return Players(
-      players: List<Player>.from(map['players']?.map((x) => Player.fromMap(x))),
+      players: List<Player>.from(
+        (map['players'] as List<dynamic>).map<Player>(
+          (x) => Player.fromMap(x as Map<String, dynamic>),
+        ),
+      ),
     );
   }
 
   String toJson() => json.encode(toMap());
 
-  factory Players.fromJson(String source) =>
-      Players.fromMap(json.decode(source));
+  factory Players.fromJson(String source) => Players.fromMap(json.decode(source) as Map<String, dynamic>);
 
   @override
   String toString() => 'Players(players: $players)';

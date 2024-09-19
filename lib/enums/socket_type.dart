@@ -1,5 +1,1 @@
-enum SocketType {
-  none,
-  server,
-  client,
-}
+enum SocketType { server, client }

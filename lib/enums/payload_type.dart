@@ -1,5 +1,1 @@
-enum Payloadtype {
-  player,
-  players,
-  payment,
-}
+enum PayloadType { name, players, payment }

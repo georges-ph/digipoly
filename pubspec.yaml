@@ -10,7 +10,7 @@ dependencies:
   flutter:
     sdk: flutter
   network_info_plus: ^6.0.0
-  client_server_sockets: ^0.0.2
+  client_server_sockets: ^1.0.1
 
 dev_dependencies:
   flutter_test:
