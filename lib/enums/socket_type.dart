@@ -1,1 +1,0 @@
-enum SocketType { server, client }

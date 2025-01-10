@@ -1,21 +1,19 @@
 name: digipoly
-description: A digital monopoly banking.
+description: "A digital monopoly banking."
 publish_to: 'none'
-version: 1.0.0+1
+version: 0.1.0
 
 environment:
-  sdk: '>=3.4.4 <4.0.0'
+  sdk: ^3.6.0
 
 dependencies:
   flutter:
     sdk: flutter
-  network_info_plus: ^6.0.0
-  client_server_sockets: ^1.0.1
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
-  flutter_lints: ^3.0.0
+  flutter_lints: ^5.0.0
 
 flutter:
   uses-material-design: true
