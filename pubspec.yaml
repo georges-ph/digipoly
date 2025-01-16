@@ -9,6 +9,10 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  client_server_sockets: ^1.0.1
+  provider: ^6.1.2
+  network_info_plus: ^6.1.2
+  qr_flutter: ^4.1.0
 
 dev_dependencies:
   flutter_test:
