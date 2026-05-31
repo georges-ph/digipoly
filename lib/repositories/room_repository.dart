@@ -7,6 +7,7 @@ import '../services/server_service.dart';
 
 abstract class RoomRepository {
   Future<(Failure? failure, String? roomName)> createRoom();
+  Future<(Failure? failure, bool closed)> closeRoom();
 }
 
 class RoomRepositoryImpl implements RoomRepository {
@@ -27,47 +28,50 @@ class RoomRepositoryImpl implements RoomRepository {
 
   @override
   Future<(Failure?, String?)> createRoom() async {
-    bool serverStarted = false;
-    bool broadcastStarted = false;
-
     try {
       await _networkService.checkWifi();
       final address = await _networkService.getIpAddress();
-
       final port = await _serverService.start(address);
-      serverStarted = true;
 
       final deviceName = await _deviceService.getName();
       final roomName = "$deviceName's room";
 
       await _discoveryService.broadcast(roomName, port);
-      broadcastStarted = true;
 
       return (null, roomName);
     } on AppException catch (e) {
-      await _rollbackCreation(serverStarted, broadcastStarted);
+      await closeRoom();
       return (e.toFailure, null);
     } catch (e) {
-      await _rollbackCreation(serverStarted, broadcastStarted);
+      await closeRoom();
       return (UnknownFailure(e.toString()), null);
     }
   }
 
-  Future<void> _rollbackCreation(bool serverStarted, bool broadcastStarted) async {
-    if (serverStarted) {
+  @override
+  Future<(Failure?, bool)> closeRoom() async {
+    AppException? exception;
+
+    if (_serverService.isRunning) {
       try {
         await _serverService.stop();
-      } catch (_) {
-        // Ignore errors as it's not our primary logic
+      } on AppException catch (e) {
+        exception ??= e;
+      } catch (e) {
+        exception ??= UnknownException(e.toString());
       }
     }
 
-    if (broadcastStarted) {
+    if (_discoveryService.isBroadcasting) {
       try {
         await _discoveryService.stopBroadcast();
-      } catch (_) {
-        // Ignore errors as it's not our primary logic
+      } on AppException catch (e) {
+        exception ??= e;
+      } catch (e) {
+        exception ??= UnknownException(e.toString());
       }
     }
+
+    return exception == null ? (null, true) : (exception.toFailure, false);
   }
 }

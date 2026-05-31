@@ -8,10 +8,15 @@ class RoomScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text("Room Details")),
-      body: Center(
-        child: Text(context.read<RoomProvider>().roomName ?? "Room name"),
+    return PopScope(
+      onPopInvokedWithResult: (didPop, result) async {
+        if (didPop) await context.read<RoomProvider>().closeRoom();
+      },
+      child: Scaffold(
+        appBar: AppBar(title: const Text("Room Details")),
+        body: Center(
+          child: Text(context.read<RoomProvider>().roomName ?? "Room name"),
+        ),
       ),
     );
   }

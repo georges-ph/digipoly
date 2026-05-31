@@ -27,6 +27,7 @@ class ServiceLocator {
   static RoomProvider get roomProvider {
     return _roomProvider ??= RoomProvider(
       createRoomUsecase: CreateRoomUsecase(_roomRepository),
+      closeRoomUsecase: CloseRoomUsecase(_roomRepository),
     );
   }
 }

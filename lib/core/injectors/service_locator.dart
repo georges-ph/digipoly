@@ -8,6 +8,7 @@ import '../../services/device_service.dart';
 import '../../services/discovery_service.dart';
 import '../../services/network_service.dart';
 import '../../services/server_service.dart';
+import '../../usecases/close_room_usecase.dart';
 import '../../usecases/create_room_usecase.dart';
 
 part 'service_locator.main.dart';

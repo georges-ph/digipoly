@@ -10,6 +10,9 @@ class DiscoveryService {
   BonsoirBroadcast? _broadcast;
   BonsoirDiscovery? _discovery;
 
+  bool get isBroadcasting => _broadcast != null;
+  bool get isDiscovering => _discovery != null;
+
   StreamController<DiscoveredRoom>? _roomsController;
   Stream<DiscoveredRoom>? get onRoomEvent => _roomsController?.stream;
 

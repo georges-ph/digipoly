@@ -8,6 +8,8 @@ import '../core/errors/exceptions.dart';
 class ServerService {
   HttpServer? _server;
 
+  bool get isRunning => _server != null;
+
   /// Starts the server on the specified [address] and returns the port that has started on.
   ///
   /// Throws a [ServerException] if the server is already running.
