@@ -20,7 +20,7 @@ class DiscoveryService {
   ///
   /// Throws a [DiscoveryException] if the broadcast is already running.
   Future<void> broadcast(String message, int port) async {
-    if (_broadcast != null) {
+    if (isBroadcasting) {
       throw const DiscoveryException("Broadcast is already running");
     }
 
@@ -35,7 +35,7 @@ class DiscoveryService {
   ///
   /// Throws a [DiscoveryException] if the discovery is already running.
   Future<void> discover() async {
-    if (_discovery != null) {
+    if (isDiscovering) {
       throw const DiscoveryException("Discovery is already running");
     }
 

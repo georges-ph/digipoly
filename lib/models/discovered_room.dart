@@ -6,7 +6,7 @@ class DiscoveredRoom {
   final int port;
   final DiscoveredRoomEvent event;
 
-  DiscoveredRoom({
+  const DiscoveredRoom({
     required this.name,
     required this.address,
     required this.port,

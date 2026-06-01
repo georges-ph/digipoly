@@ -16,7 +16,7 @@ class RoomRepositoryImpl implements RoomRepository {
   final DiscoveryService _discoveryService;
   final DeviceService _deviceService;
 
-  RoomRepositoryImpl({
+  const RoomRepositoryImpl({
     required NetworkService networkService,
     required ServerService serverService,
     required DiscoveryService discoveryService,

@@ -14,7 +14,7 @@ class ServerService {
   ///
   /// Throws a [ServerException] if the server is already running.
   Future<int> start(String address) async {
-    if (_server != null) throw const ServerException("Server is already running");
+    if (isRunning) throw const ServerException("Server is already running");
 
     final handler = webSocketHandler((webSocket, _) {});
     _server = await shelf_io.serve(handler, address, 0);

@@ -4,7 +4,7 @@ import 'usecase.dart';
 
 class CreateRoomUsecase implements Usecase<String, NoParams> {
   final RoomRepository _roomRepository;
-  CreateRoomUsecase(this._roomRepository);
+  const CreateRoomUsecase(this._roomRepository);
 
   @override
   Future<(Failure?, String?)> call(NoParams params) async {
