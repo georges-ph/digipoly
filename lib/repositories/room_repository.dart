@@ -1,5 +1,6 @@
 import '../core/errors/exceptions.dart';
 import '../core/errors/failures.dart';
+import '../models/discovered_room.dart';
 import '../services/device_service.dart';
 import '../services/discovery_service.dart';
 import '../services/network_service.dart';
@@ -8,6 +9,7 @@ import '../services/server_service.dart';
 abstract class RoomRepository {
   Future<(Failure? failure, String? roomName)> createRoom();
   Future<(Failure? failure, bool closed)> closeRoom();
+  Future<(Failure? failure, Stream<DiscoveredRoom>?)> discoverRooms();
 }
 
 class RoomRepositoryImpl implements RoomRepository {
@@ -28,6 +30,10 @@ class RoomRepositoryImpl implements RoomRepository {
 
   @override
   Future<(Failure?, String?)> createRoom() async {
+    if (_serverService.isRunning) {
+      return (const ServerFailure("A room is already active"), null);
+    }
+
     try {
       await _networkService.checkWifi();
       final address = await _networkService.getIpAddress();
@@ -73,5 +79,30 @@ class RoomRepositoryImpl implements RoomRepository {
     }
 
     return exception == null ? (null, true) : (exception.toFailure, false);
+  }
+
+  @override
+  Future<(Failure?, Stream<DiscoveredRoom>?)> discoverRooms() async {
+    if (_discoveryService.isDiscovering) {
+      return (null, _discoveryService.onRoomEvent);
+    }
+
+    try {
+      await _networkService.checkWifi();
+      await _discoveryService.discover();
+      return (null, _discoveryService.onRoomEvent);
+    } on AppException catch (e) {
+      try {
+        await _discoveryService.stopDiscovery();
+      } catch (_) {}
+
+      return (e.toFailure, null);
+    } catch (e) {
+      try {
+        await _discoveryService.stopDiscovery();
+      } catch (_) {}
+
+      return (UnknownFailure(e.toString()), null);
+    }
   }
 }

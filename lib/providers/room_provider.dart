@@ -1,19 +1,26 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../core/errors/failures.dart';
+import '../models/discovered_room.dart';
 import '../usecases/close_room_usecase.dart';
 import '../usecases/create_room_usecase.dart';
+import '../usecases/discover_rooms_usecase.dart';
 import '../usecases/usecase.dart';
 
 class RoomProvider extends ChangeNotifier {
   final CreateRoomUsecase _createRoomUsecase;
   final CloseRoomUsecase _closeRoomUsecase;
+  final DiscoverRoomsUsecase _discoverRoomsUsecase;
 
   RoomProvider({
     required CreateRoomUsecase createRoomUsecase,
     required CloseRoomUsecase closeRoomUsecase,
+    required DiscoverRoomsUsecase discoverRoomsUsecase,
   }) : _createRoomUsecase = createRoomUsecase,
-       _closeRoomUsecase = closeRoomUsecase;
+       _closeRoomUsecase = closeRoomUsecase,
+       _discoverRoomsUsecase = discoverRoomsUsecase;
 
   Failure? _failure;
   Failure? get failure => _failure;
@@ -21,13 +28,11 @@ class RoomProvider extends ChangeNotifier {
   String? _roomName;
   String? get roomName => _roomName;
 
-  Future<bool> createRoom() async {
-    if (_roomName != null) {
-      _failure = const ServerFailure("A room is already active");
-      notifyListeners();
-      return false;
-    }
+  final List<DiscoveredRoom> _rooms = [];
+  List<DiscoveredRoom> get rooms => List.unmodifiable(_rooms);
+  StreamSubscription<DiscoveredRoom>? _roomsSubscription;
 
+  Future<bool> createRoom() async {
     _failure = null;
     notifyListeners();
 
@@ -57,5 +62,27 @@ class RoomProvider extends ChangeNotifier {
 
     notifyListeners();
     return _failure == null;
+  }
+
+  Future<bool> discoverRooms() async {
+    _failure = null;
+    _rooms.clear();
+    await _roomsSubscription?.cancel();
+    notifyListeners();
+
+    final (failure, roomsStream) = await _discoverRoomsUsecase.call(NoParams());
+
+    if (failure != null) {
+      _failure = failure;
+      notifyListeners();
+      return false;
+    }
+
+    _roomsSubscription = roomsStream?.listen((room) {
+      room.event == .found ? _rooms.add(room) : _rooms.remove(room);
+      notifyListeners();
+    });
+
+    return true;
   }
 }

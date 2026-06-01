@@ -12,9 +12,18 @@ class HomeScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       body: Center(
-        child: ElevatedButton(
-          onPressed: () => _createRoom(context),
-          child: const Text("Create room"),
+        child: Column(
+          mainAxisAlignment: .center,
+          children: [
+            ElevatedButton(
+              onPressed: () => _createRoom(context),
+              child: const Text("Create room"),
+            ),
+            ElevatedButton(
+              onPressed: () => _joinRoom(context),
+              child: const Text("Join room"),
+            ),
+          ],
         ),
       ),
     );
@@ -31,6 +40,20 @@ class HomeScreen extends StatelessWidget {
       return;
     }
 
-    if (started) context.push(const RoomScreen());
+    if (started) context.push(const RoomScreen(isHost: true));
+  }
+
+  Future<void> _joinRoom(BuildContext context) async {
+    final provider = context.read<RoomProvider>();
+    final discovering = await provider.discoverRooms();
+
+    if (!context.mounted) return;
+
+    if (provider.failure != null) {
+      context.showSnackBar(SnackBar(content: Text(provider.failure!.message)));
+      return;
+    }
+
+    if (discovering) context.push(const RoomScreen());
   }
 }
