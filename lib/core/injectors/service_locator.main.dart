@@ -5,6 +5,7 @@ class ServiceLocator {
   static late ServerService _serverService;
   static late DiscoveryService _discoveryService;
   static late DeviceService _deviceService;
+  static late ClientService _clientService;
 
   static late RoomRepository _roomRepository;
 
@@ -15,12 +16,14 @@ class ServiceLocator {
     _serverService = ServerService();
     _discoveryService = DiscoveryService();
     _deviceService = DeviceService(DeviceInfoPlugin());
+    _clientService = ClientService();
 
     _roomRepository = RoomRepositoryImpl(
       networkService: _networkService,
       serverService: _serverService,
       discoveryService: _discoveryService,
       deviceService: _deviceService,
+      clientService: _clientService,
     );
   }
 
@@ -29,6 +32,8 @@ class ServiceLocator {
       createRoomUsecase: CreateRoomUsecase(_roomRepository),
       closeRoomUsecase: CloseRoomUsecase(_roomRepository),
       startDiscoveryUsecase: StartDiscoveryUsecase(_roomRepository),
+      joinRoomUsecase: JoinRoomUsecase(_roomRepository),
+      stopDiscoveryUsecase: StopDiscoveryUsecase(_roomRepository),
     );
   }
 }

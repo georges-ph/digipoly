@@ -18,3 +18,7 @@ class ServerFailure extends Failure {
 class DiscoveryFailure extends Failure {
   const DiscoveryFailure(super.message);
 }
+
+class ClientFailure extends Failure {
+  const ClientFailure(super.message);
+}

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../core/extensions/context_extensions.dart';
 import '../models/discovered_room.dart';
 import '../providers/room_provider.dart';
 
@@ -14,9 +15,11 @@ class RoomScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final provider = context.read<RoomProvider>();
+
     return PopScope(
       onPopInvokedWithResult: (didPop, result) async {
-        if (didPop) await context.read<RoomProvider>().closeRoom();
+        if (didPop) isHost ? await provider.closeRoom() : await provider.stopDiscovery();
       },
       child: Scaffold(
         appBar: AppBar(title: const Text("Room Details")),
@@ -54,10 +57,25 @@ class _RoomsList extends StatelessWidget {
         final room = rooms.elementAt(index);
 
         return ListTile(
+          onTap: () => _joinRoom(context, room),
           title: Text(room.name),
           subtitle: Text(room.address),
         );
       },
     );
+  }
+
+  Future<void> _joinRoom(BuildContext context, DiscoveredRoom room) async {
+    final provider = context.read<RoomProvider>();
+    final joined = await provider.joinRoom(room.address, room.port);
+
+    if (!context.mounted) return;
+
+    if (provider.failure != null) {
+      context.showSnackBar(SnackBar(content: Text(provider.failure!.message)));
+      return;
+    }
+
+    if (joined) context.showSnackBar(const SnackBar(content: Text("Joined room")));
   }
 }

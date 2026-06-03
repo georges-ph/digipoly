@@ -33,3 +33,10 @@ class DiscoveryException extends AppException {
   @override
   Failure get toFailure => DiscoveryFailure(message);
 }
+
+class ClientException extends AppException {
+  const ClientException(super.message);
+
+  @override
+  Failure get toFailure => ClientFailure(message);
+}

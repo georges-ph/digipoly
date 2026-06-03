@@ -13,10 +13,11 @@ class MainApp extends StatelessWidget {
       providers: [
         ChangeNotifierProvider(create: (context) => ServiceLocator.roomProvider),
       ],
-      child: const MaterialApp(
+      child: MaterialApp(
         title: "Digipoly",
         debugShowCheckedModeBanner: false,
-        home: HomeScreen(),
+        home: const HomeScreen(),
+        darkTheme: ThemeData(brightness: .dark),
       ),
     );
   }

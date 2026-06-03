@@ -16,6 +16,7 @@ dependencies:
   provider: ^6.1.5+1
   shelf: ^1.4.2
   shelf_web_socket: ^3.0.0
+  web_socket: ^1.0.1
 
 dev_dependencies:
   flutter_test:
