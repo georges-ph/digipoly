@@ -13,6 +13,7 @@ abstract class RoomRepository {
   Future<(Failure? failure, Stream<DiscoveredRoom>? roomsStream)> startDiscovery();
   Future<(Failure? failure, bool joined)> joinRoom(String address, int port);
   Future<(Failure? failure, bool stopped)> stopDiscovery();
+  Future<(Failure? failure, bool left)> leaveRoom();
 }
 
 class RoomRepositoryImpl implements RoomRepository {
@@ -144,6 +145,22 @@ class RoomRepositoryImpl implements RoomRepository {
 
     try {
       await _discoveryService.stopDiscovery();
+      return (null, true);
+    } on AppException catch (e) {
+      return (e.toFailure, false);
+    } catch (e) {
+      return (UnknownFailure(e.toString()), false);
+    }
+  }
+
+  @override
+  Future<(Failure?, bool)> leaveRoom() async {
+    if (!_clientService.isConnected) {
+      return (null, true);
+    }
+
+    try {
+      await _clientService.disconnect();
       return (null, true);
     } on AppException catch (e) {
       return (e.toFailure, false);

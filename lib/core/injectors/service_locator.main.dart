@@ -34,6 +34,7 @@ class ServiceLocator {
       startDiscoveryUsecase: StartDiscoveryUsecase(_roomRepository),
       joinRoomUsecase: JoinRoomUsecase(_roomRepository),
       stopDiscoveryUsecase: StopDiscoveryUsecase(_roomRepository),
+      leaveRoomUsecase: LeaveRoomUsecase(_roomRepository),
     );
   }
 }

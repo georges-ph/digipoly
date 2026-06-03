@@ -19,7 +19,14 @@ class RoomScreen extends StatelessWidget {
 
     return PopScope(
       onPopInvokedWithResult: (didPop, result) async {
-        if (didPop) isHost ? await provider.closeRoom() : await provider.stopDiscovery();
+        if (!didPop) return;
+
+        if (isHost) {
+          await provider.closeRoom();
+        } else {
+          await provider.stopDiscovery();
+          await provider.leaveRoom();
+        }
       },
       child: Scaffold(
         appBar: AppBar(title: const Text("Room Details")),

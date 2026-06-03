@@ -12,6 +12,7 @@ import '../../services/server_service.dart';
 import '../../usecases/close_room_usecase.dart';
 import '../../usecases/create_room_usecase.dart';
 import '../../usecases/join_room_usecase.dart';
+import '../../usecases/leave_room_usecase.dart';
 import '../../usecases/start_discovery_usecase.dart';
 import '../../usecases/stop_discovery_usecase.dart';
 

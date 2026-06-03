@@ -7,6 +7,7 @@ import '../models/discovered_room.dart';
 import '../usecases/close_room_usecase.dart';
 import '../usecases/create_room_usecase.dart';
 import '../usecases/join_room_usecase.dart';
+import '../usecases/leave_room_usecase.dart';
 import '../usecases/start_discovery_usecase.dart';
 import '../usecases/stop_discovery_usecase.dart';
 import '../usecases/usecase.dart';
@@ -17,6 +18,7 @@ class RoomProvider extends ChangeNotifier {
   final StartDiscoveryUsecase _startDiscoveryUsecase;
   final JoinRoomUsecase _joinRoomUsecase;
   final StopDiscoveryUsecase _stopDiscoveryUsecase;
+  final LeaveRoomUsecase _leaveRoomUsecase;
 
   RoomProvider({
     required CreateRoomUsecase createRoomUsecase,
@@ -24,11 +26,13 @@ class RoomProvider extends ChangeNotifier {
     required StartDiscoveryUsecase startDiscoveryUsecase,
     required JoinRoomUsecase joinRoomUsecase,
     required StopDiscoveryUsecase stopDiscoveryUsecase,
+    required LeaveRoomUsecase leaveRoomUsecase,
   }) : _createRoomUsecase = createRoomUsecase,
        _closeRoomUsecase = closeRoomUsecase,
        _startDiscoveryUsecase = startDiscoveryUsecase,
        _joinRoomUsecase = joinRoomUsecase,
-       _stopDiscoveryUsecase = stopDiscoveryUsecase;
+       _stopDiscoveryUsecase = stopDiscoveryUsecase,
+       _leaveRoomUsecase = leaveRoomUsecase;
 
   Failure? _failure;
   Failure? get failure => _failure;
@@ -129,6 +133,22 @@ class RoomProvider extends ChangeNotifier {
     await _roomsSubscription?.cancel();
     _roomsSubscription = null;
     _rooms.clear();
+
+    notifyListeners();
+    return true;
+  }
+
+  Future<bool> leaveRoom() async {
+    _failure = null;
+    notifyListeners();
+
+    final (failure, left) = await _leaveRoomUsecase.call(NoParams());
+
+    if (failure != null) {
+      _failure = failure;
+      notifyListeners();
+      return false;
+    }
 
     notifyListeners();
     return true;
