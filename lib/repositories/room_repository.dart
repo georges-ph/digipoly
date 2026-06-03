@@ -9,7 +9,7 @@ import '../services/server_service.dart';
 abstract class RoomRepository {
   Future<(Failure? failure, String? roomName)> createRoom();
   Future<(Failure? failure, bool closed)> closeRoom();
-  Future<(Failure? failure, Stream<DiscoveredRoom>?)> discoverRooms();
+  Future<(Failure? failure, Stream<DiscoveredRoom>? roomsStream)> startDiscovery();
 }
 
 class RoomRepositoryImpl implements RoomRepository {
@@ -82,7 +82,7 @@ class RoomRepositoryImpl implements RoomRepository {
   }
 
   @override
-  Future<(Failure?, Stream<DiscoveredRoom>?)> discoverRooms() async {
+  Future<(Failure?, Stream<DiscoveredRoom>?)> startDiscovery() async {
     if (_discoveryService.isDiscovering) {
       return (null, _discoveryService.onRoomEvent);
     }

@@ -6,21 +6,21 @@ import '../core/errors/failures.dart';
 import '../models/discovered_room.dart';
 import '../usecases/close_room_usecase.dart';
 import '../usecases/create_room_usecase.dart';
-import '../usecases/discover_rooms_usecase.dart';
+import '../usecases/start_discovery_usecase.dart';
 import '../usecases/usecase.dart';
 
 class RoomProvider extends ChangeNotifier {
   final CreateRoomUsecase _createRoomUsecase;
   final CloseRoomUsecase _closeRoomUsecase;
-  final DiscoverRoomsUsecase _discoverRoomsUsecase;
+  final StartDiscoveryUsecase _startDiscoveryUsecase;
 
   RoomProvider({
     required CreateRoomUsecase createRoomUsecase,
     required CloseRoomUsecase closeRoomUsecase,
-    required DiscoverRoomsUsecase discoverRoomsUsecase,
+    required StartDiscoveryUsecase startDiscoveryUsecase,
   }) : _createRoomUsecase = createRoomUsecase,
        _closeRoomUsecase = closeRoomUsecase,
-       _discoverRoomsUsecase = discoverRoomsUsecase;
+       _startDiscoveryUsecase = startDiscoveryUsecase;
 
   Failure? _failure;
   Failure? get failure => _failure;
@@ -70,7 +70,7 @@ class RoomProvider extends ChangeNotifier {
     await _roomsSubscription?.cancel();
     notifyListeners();
 
-    final (failure, roomsStream) = await _discoverRoomsUsecase.call(NoParams());
+    final (failure, roomsStream) = await _startDiscoveryUsecase.call(NoParams());
 
     if (failure != null) {
       _failure = failure;

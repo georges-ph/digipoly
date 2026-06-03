@@ -10,6 +10,6 @@ import '../../services/network_service.dart';
 import '../../services/server_service.dart';
 import '../../usecases/close_room_usecase.dart';
 import '../../usecases/create_room_usecase.dart';
-import '../../usecases/discover_rooms_usecase.dart';
+import '../../usecases/start_discovery_usecase.dart';
 
 part 'service_locator.main.dart';
