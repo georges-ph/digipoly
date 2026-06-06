@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../core/errors/failures.dart';
 import '../models/discovered_room.dart';
 import '../models/events/app_event.dart';
+import '../models/player.dart';
 import '../usecases/close_room_usecase.dart';
 import '../usecases/create_room_usecase.dart';
 import '../usecases/join_room_usecase.dart';
@@ -43,8 +44,8 @@ class RoomProvider extends ChangeNotifier {
 
   StreamSubscription<RoomEvent>? _serverRoomEventsSubscription;
 
-  final List<String> _players = [];
-  List<String> get players => List.unmodifiable(_players);
+  final List<Player> _players = [];
+  List<Player> get players => List.unmodifiable(_players);
 
   final List<DiscoveredRoom> _rooms = [];
   List<DiscoveredRoom> get rooms => List.unmodifiable(_rooms);
@@ -69,8 +70,12 @@ class RoomProvider extends ChangeNotifier {
 
   void _handleRoomEvents(RoomEvent event) {
     switch (event) {
-      case JoinRoomEvent(:final playerName):
-        _players.add(playerName);
+      case JoinRoomEvent(:final player):
+        _players.add(player);
+        notifyListeners();
+
+      case LeaveRoomEvent(:final player):
+        _players.remove(player);
         notifyListeners();
     }
   }

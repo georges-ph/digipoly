@@ -2,6 +2,7 @@ import '../core/errors/exceptions.dart';
 import '../core/errors/failures.dart';
 import '../models/discovered_room.dart';
 import '../models/events/app_event.dart';
+import '../models/player.dart';
 import '../services/client_service.dart';
 import '../services/device_service.dart';
 import '../services/discovery_service.dart';
@@ -124,7 +125,7 @@ class RoomRepositoryImpl implements RoomRepository {
       await _networkService.checkWifi();
       await _clientService.connect(address, port);
       final deviceName = await _deviceService.getName();
-      _clientService.send(JoinRoomEvent(playerName: deviceName).toJson);
+      _clientService.send(JoinRoomEvent(player: Player(name: deviceName)).toJson);
       return (null, true);
     } on AppException catch (e) {
       try {
@@ -163,6 +164,8 @@ class RoomRepositoryImpl implements RoomRepository {
     }
 
     try {
+      final deviceName = await _deviceService.getName();
+      _clientService.send(LeaveRoomEvent(player: Player(name: deviceName)).toJson);
       await _clientService.disconnect();
       return (null, true);
     } on AppException catch (e) {

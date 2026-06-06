@@ -5,13 +5,25 @@ sealed class RoomEvent extends AppEvent {
 }
 
 class JoinRoomEvent extends RoomEvent {
-  final String playerName;
-  const JoinRoomEvent({required this.playerName}) : super(.joinRoom);
+  final Player player;
+  const JoinRoomEvent({required this.player}) : super(.joinRoom);
 
   factory JoinRoomEvent.fromMap(Map<String, dynamic> map) {
-    return JoinRoomEvent(playerName: map["player_name"] as String);
+    return JoinRoomEvent(player: Player.fromMap(map));
   }
 
   @override
-  Map<String, dynamic> get _toMap => {"player_name": playerName};
+  Map<String, dynamic> get _toMap => player.toMap();
+}
+
+class LeaveRoomEvent extends RoomEvent {
+  final Player player;
+  const LeaveRoomEvent({required this.player}) : super(.leaveRoom);
+
+  factory LeaveRoomEvent.fromMap(Map<String, dynamic> map) {
+    return LeaveRoomEvent(player: Player.fromMap(map));
+  }
+
+  @override
+  Map<String, dynamic> get _toMap => player.toMap();
 }

@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../core/extensions/context_extensions.dart';
 import '../models/discovered_room.dart';
+import '../models/player.dart';
 import '../providers/room_provider.dart';
 
 class RoomScreen extends StatelessWidget {
@@ -41,7 +42,7 @@ class _RoomDetails extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final players = context.select<RoomProvider, List<String>>((value) => value.players);
+    final players = context.select<RoomProvider, List<Player>>((value) => value.players);
 
     return Column(
       children: [
@@ -79,7 +80,7 @@ class _RoomDetails extends StatelessWidget {
             itemCount: players.length,
             itemBuilder: (context, index) {
               final player = players.elementAt(index);
-              return Card(child: ListTile(title: Text(player)));
+              return Card(child: ListTile(title: Text(player.name)));
             },
           ),
         ),
