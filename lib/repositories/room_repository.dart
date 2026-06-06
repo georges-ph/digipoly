@@ -1,6 +1,7 @@
 import '../core/errors/exceptions.dart';
 import '../core/errors/failures.dart';
 import '../models/discovered_room.dart';
+import '../models/events/app_event.dart';
 import '../services/client_service.dart';
 import '../services/device_service.dart';
 import '../services/discovery_service.dart';
@@ -8,7 +9,7 @@ import '../services/network_service.dart';
 import '../services/server_service.dart';
 
 abstract class RoomRepository {
-  Future<(Failure? failure, String? roomName)> createRoom();
+  Future<(Failure? failure, (String roomName, Stream<RoomEvent> events)?)> createRoom();
   Future<(Failure? failure, bool closed)> closeRoom();
   Future<(Failure? failure, Stream<DiscoveredRoom>? roomsStream)> startDiscovery();
   Future<(Failure? failure, bool joined)> joinRoom(String address, int port);
@@ -36,7 +37,7 @@ class RoomRepositoryImpl implements RoomRepository {
        _clientService = clientService;
 
   @override
-  Future<(Failure?, String?)> createRoom() async {
+  Future<(Failure?, (String, Stream<RoomEvent>)?)> createRoom() async {
     if (_serverService.isRunning) {
       return (const ServerFailure("A room is already active"), null);
     }
@@ -45,13 +46,13 @@ class RoomRepositoryImpl implements RoomRepository {
       await _networkService.checkWifi();
       final address = await _networkService.getIpAddress();
       final port = await _serverService.start(address);
+      final roomEvents = _serverService.events!.where((e) => e is RoomEvent).cast<RoomEvent>();
 
       final deviceName = await _deviceService.getName();
       final roomName = "$deviceName's room";
 
       await _discoveryService.broadcast(roomName, port);
-
-      return (null, roomName);
+      return (null, (roomName, roomEvents));
     } on AppException catch (e) {
       await closeRoom();
       return (e.toFailure, null);
@@ -122,6 +123,8 @@ class RoomRepositoryImpl implements RoomRepository {
     try {
       await _networkService.checkWifi();
       await _clientService.connect(address, port);
+      final deviceName = await _deviceService.getName();
+      _clientService.send(JoinRoomEvent(playerName: deviceName).toJson);
       return (null, true);
     } on AppException catch (e) {
       try {

@@ -3,8 +3,7 @@ import 'package:flutter/foundation.dart';
 
 class DeviceService {
   final DeviceInfoPlugin _deviceInfo;
-
-  DeviceService(this._deviceInfo);
+  const DeviceService(this._deviceInfo);
 
   /// Gets the device name by platform. Returns unknown for unknown platforms.
   Future<String> getName() async {

@@ -41,8 +41,49 @@ class _RoomDetails extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: Text(context.read<RoomProvider>().roomName!),
+    final players = context.select<RoomProvider, List<String>>((value) => value.players);
+
+    return Column(
+      children: [
+        Text.rich(
+          TextSpan(
+            style: Theme.of(context).textTheme.titleLarge,
+            children: [
+              const TextSpan(text: "Room ID: "),
+              TextSpan(
+                text: context.read<RoomProvider>().roomName,
+                style: const TextStyle(fontWeight: .bold),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+        ListTile(
+          title: Text(
+            "Players joined",
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
+          trailing: Text.rich(
+            TextSpan(
+              children: [
+                const WidgetSpan(child: Icon(Icons.people), alignment: .middle),
+                const WidgetSpan(child: SizedBox(width: 4)),
+                TextSpan(text: players.length.toString()),
+              ],
+            ),
+          ),
+        ),
+        Expanded(
+          child: ListView.builder(
+            padding: const .fromLTRB(16, 0, 16, 24),
+            itemCount: players.length,
+            itemBuilder: (context, index) {
+              final player = players.elementAt(index);
+              return Card(child: ListTile(title: Text(player)));
+            },
+          ),
+        ),
+      ],
     );
   }
 }

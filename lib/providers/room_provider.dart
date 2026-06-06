@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../core/errors/failures.dart';
 import '../models/discovered_room.dart';
+import '../models/events/app_event.dart';
 import '../usecases/close_room_usecase.dart';
 import '../usecases/create_room_usecase.dart';
 import '../usecases/join_room_usecase.dart';
@@ -40,6 +41,11 @@ class RoomProvider extends ChangeNotifier {
   String? _roomName;
   String? get roomName => _roomName;
 
+  StreamSubscription<RoomEvent>? _serverRoomEventsSubscription;
+
+  final List<String> _players = [];
+  List<String> get players => List.unmodifiable(_players);
+
   final List<DiscoveredRoom> _rooms = [];
   List<DiscoveredRoom> get rooms => List.unmodifiable(_rooms);
   StreamSubscription<DiscoveredRoom>? _roomsSubscription;
@@ -48,16 +54,25 @@ class RoomProvider extends ChangeNotifier {
     _failure = null;
     notifyListeners();
 
-    final (failure, roomName) = await _createRoomUsecase.call(NoParams());
+    final (failure, room) = await _createRoomUsecase.call(NoParams());
 
     if (failure != null) {
       _failure = failure;
     } else {
-      _roomName = roomName;
+      _roomName = room?.$1;
+      _serverRoomEventsSubscription = room?.$2.listen(_handleRoomEvents);
     }
 
     notifyListeners();
     return _failure == null;
+  }
+
+  void _handleRoomEvents(RoomEvent event) {
+    switch (event) {
+      case JoinRoomEvent(:final playerName):
+        _players.add(playerName);
+        notifyListeners();
+    }
   }
 
   Future<bool> closeRoom() async {
@@ -72,6 +87,8 @@ class RoomProvider extends ChangeNotifier {
       _roomName = null;
     }
 
+    await _serverRoomEventsSubscription?.cancel();
+    _players.clear();
     notifyListeners();
     return _failure == null;
   }

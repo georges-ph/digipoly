@@ -17,8 +17,14 @@ class ClientService {
     _socket = await WebSocket.connect(uri);
   }
 
+  /// Disconnects the socket if previously connected.
   Future<void> disconnect() async {
     await _socket?.close();
     _socket = null;
+  }
+
+  /// Sends a [message] to the server if connected.
+  void send(String message) {
+    _socket?.sendText(message);
   }
 }
