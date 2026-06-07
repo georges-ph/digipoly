@@ -13,7 +13,7 @@ abstract class RoomRepository {
   Future<(Failure? failure, (String roomName, Stream<RoomEvent> events)?)> createRoom();
   Future<(Failure? failure, bool closed)> closeRoom();
   Future<(Failure? failure, Stream<DiscoveredRoom>? roomsStream)> startDiscovery();
-  Future<(Failure? failure, bool joined)> joinRoom(String address, int port);
+  Future<(Failure? failure, Stream<RoomEvent>?)> joinRoom(String address, int port);
   Future<(Failure? failure, bool stopped)> stopDiscovery();
   Future<(Failure? failure, bool left)> leaveRoom();
 }
@@ -69,6 +69,7 @@ class RoomRepositoryImpl implements RoomRepository {
 
     if (_serverService.isRunning) {
       try {
+        _serverService.broadcast(const CloseRoomEvent().toJson);
         await _serverService.stop();
       } on AppException catch (e) {
         exception ??= e;
@@ -116,9 +117,9 @@ class RoomRepositoryImpl implements RoomRepository {
   }
 
   @override
-  Future<(Failure?, bool)> joinRoom(String address, int port) async {
+  Future<(Failure?, Stream<RoomEvent>?)> joinRoom(String address, int port) async {
     if (_clientService.isConnected) {
-      return (const ClientFailure("Already connected to a room"), false);
+      return (const ClientFailure("Already connected to a room"), null);
     }
 
     try {
@@ -126,18 +127,20 @@ class RoomRepositoryImpl implements RoomRepository {
       await _clientService.connect(address, port);
       final deviceName = await _deviceService.getName();
       _clientService.send(JoinRoomEvent(player: Player(name: deviceName)).toJson);
-      return (null, true);
+
+      final roomEvents = _clientService.events!.where((e) => e is RoomEvent).cast<RoomEvent>();
+      return (null, roomEvents);
     } on AppException catch (e) {
       try {
         await _clientService.disconnect();
       } catch (_) {}
-      return (e.toFailure, false);
+      return (e.toFailure, null);
     } catch (e) {
       try {
         await _clientService.disconnect();
       } catch (_) {}
 
-      return (UnknownFailure(e.toString()), false);
+      return (UnknownFailure(e.toString()), null);
     }
   }
 

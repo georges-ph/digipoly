@@ -27,3 +27,14 @@ class LeaveRoomEvent extends RoomEvent {
   @override
   Map<String, dynamic> get _toMap => player.toMap();
 }
+
+class CloseRoomEvent extends RoomEvent {
+  const CloseRoomEvent() : super(.closeRoom);
+
+  factory CloseRoomEvent.fromMap(Map<String, dynamic> map) {
+    return const CloseRoomEvent();
+  }
+
+  @override
+  Map<String, dynamic> get _toMap => {};
+}

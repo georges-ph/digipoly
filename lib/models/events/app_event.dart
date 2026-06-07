@@ -4,7 +4,7 @@ import '../player.dart';
 
 part 'room_event.dart';
 
-enum AppEventType { unknown, joinRoom, leaveRoom }
+enum AppEventType { unknown, joinRoom, leaveRoom, closeRoom }
 
 sealed class AppEvent {
   final AppEventType type;
@@ -27,6 +27,7 @@ sealed class AppEvent {
       return switch (AppEventType.values.byName(type)) {
         .joinRoom => JoinRoomEvent.fromMap(data),
         .leaveRoom => LeaveRoomEvent.fromMap(data),
+        .closeRoom => CloseRoomEvent.fromMap(data),
         _ => const UnknownEvent(),
       };
     } catch (e) {

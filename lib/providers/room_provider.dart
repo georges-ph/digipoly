@@ -42,7 +42,7 @@ class RoomProvider extends ChangeNotifier {
   String? _roomName;
   String? get roomName => _roomName;
 
-  StreamSubscription<RoomEvent>? _serverRoomEventsSubscription;
+  StreamSubscription<RoomEvent>? _roomEventsSubscription;
 
   final List<Player> _players = [];
   List<Player> get players => List.unmodifiable(_players);
@@ -50,6 +50,8 @@ class RoomProvider extends ChangeNotifier {
   final List<DiscoveredRoom> _rooms = [];
   List<DiscoveredRoom> get rooms => List.unmodifiable(_rooms);
   StreamSubscription<DiscoveredRoom>? _roomsSubscription;
+
+  VoidCallback? onConnectionLost;
 
   Future<bool> createRoom() async {
     _failure = null;
@@ -61,22 +63,28 @@ class RoomProvider extends ChangeNotifier {
       _failure = failure;
     } else {
       _roomName = room?.$1;
-      _serverRoomEventsSubscription = room?.$2.listen(_handleRoomEvents);
+      _roomEventsSubscription = room?.$2.listen(_handleRoomEvents);
     }
 
     notifyListeners();
     return _failure == null;
   }
 
-  void _handleRoomEvents(RoomEvent event) {
+  Future<void> _handleRoomEvents(RoomEvent event) async {
     switch (event) {
+      // Server specific event - A player joined the room
       case JoinRoomEvent(:final player):
         _players.add(player);
         notifyListeners();
 
+      // Server specific event - A player left the room
       case LeaveRoomEvent(:final player):
         _players.remove(player);
         notifyListeners();
+
+      // Client specific event - The server closed the room
+      case CloseRoomEvent():
+        await leaveRoom();
     }
   }
 
@@ -92,8 +100,10 @@ class RoomProvider extends ChangeNotifier {
       _roomName = null;
     }
 
-    await _serverRoomEventsSubscription?.cancel();
+    await _roomEventsSubscription?.cancel();
+    _roomEventsSubscription = null;
     _players.clear();
+
     notifyListeners();
     return _failure == null;
   }
@@ -120,17 +130,22 @@ class RoomProvider extends ChangeNotifier {
     return true;
   }
 
-  Future<bool> joinRoom(String address, int port) async {
+  Future<bool> joinRoom(String name, String address, int port) async {
     _failure = null;
     notifyListeners();
 
-    final (failure, joined) = await _joinRoomUsecase.call(JoinRoomParams(address, port));
+    final (failure, roomEvents) = await _joinRoomUsecase.call(JoinRoomParams(address, port));
 
     if (failure != null) {
       _failure = failure;
       notifyListeners();
       return false;
     }
+
+    _roomEventsSubscription = roomEvents?.listen(
+      _handleRoomEvents,
+      onDone: () async => await leaveRoom(),
+    );
 
     await _roomsSubscription?.cancel();
     _roomsSubscription = null;
@@ -171,6 +186,10 @@ class RoomProvider extends ChangeNotifier {
       notifyListeners();
       return false;
     }
+
+    await _roomEventsSubscription?.cancel();
+    _roomEventsSubscription = null;
+    onConnectionLost?.call();
 
     notifyListeners();
     return true;

@@ -1,18 +1,19 @@
 import '../core/errors/failures.dart';
+import '../models/events/app_event.dart';
 import '../repositories/room_repository.dart';
 import 'usecase.dart';
 
-class JoinRoomUsecase implements Usecase<bool, JoinRoomParams> {
+class JoinRoomUsecase implements Usecase<Stream<RoomEvent>, JoinRoomParams> {
   final RoomRepository _roomRepository;
   const JoinRoomUsecase(this._roomRepository);
 
   @override
-  Future<(Failure?, bool?)> call(JoinRoomParams params) async {
+  Future<(Failure?, Stream<RoomEvent>?)> call(JoinRoomParams params) async {
     final result = await _roomRepository.joinRoom(params.address, params.port);
-    if (result.$1 != null || !result.$2) return result;
+    if (result.$1 != null || result.$2 == null) return result;
 
     await _roomRepository.stopDiscovery();
-    return (null, true);
+    return result;
   }
 }
 

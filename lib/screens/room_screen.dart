@@ -25,6 +25,7 @@ class RoomScreen extends StatelessWidget {
         if (isHost) {
           await provider.closeRoom();
         } else {
+          provider.onConnectionLost = null;
           await provider.stopDiscovery();
           await provider.leaveRoom();
         }
@@ -94,6 +95,12 @@ class _RoomsList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    context.read<RoomProvider>().onConnectionLost = () {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        context.showSnackBar(const SnackBar(content: Text("Connection lost")));
+      });
+    };
+
     final rooms = context.select<RoomProvider, List<DiscoveredRoom>>((value) => value.rooms);
 
     if (rooms.isEmpty) {
@@ -116,7 +123,7 @@ class _RoomsList extends StatelessWidget {
 
   Future<void> _joinRoom(BuildContext context, DiscoveredRoom room) async {
     final provider = context.read<RoomProvider>();
-    final joined = await provider.joinRoom(room.address, room.port);
+    final joined = await provider.joinRoom(room.name, room.address, room.port);
 
     if (!context.mounted) return;
 
