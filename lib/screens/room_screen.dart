@@ -101,6 +101,33 @@ class _RoomsList extends StatelessWidget {
       });
     };
 
+    final roomName = context.select<RoomProvider, String?>((value) => value.roomName);
+
+    if (roomName != null) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: .center,
+          children: [
+            Text.rich(
+              TextSpan(
+                children: [
+                  const TextSpan(text: "Joined the room: "),
+                  TextSpan(
+                    text: roomName,
+                    style: const TextStyle(fontWeight: .bold),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            const Text("Waiting for the host to start the game"),
+            const SizedBox(height: 24),
+            const SizedBox(width: 150, child: LinearProgressIndicator()),
+          ],
+        ),
+      );
+    }
+
     final rooms = context.select<RoomProvider, List<DiscoveredRoom>>((value) => value.rooms);
 
     if (rooms.isEmpty) {

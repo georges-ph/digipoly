@@ -142,6 +142,8 @@ class RoomProvider extends ChangeNotifier {
       return false;
     }
 
+    _roomName = name;
+
     _roomEventsSubscription = roomEvents?.listen(
       _handleRoomEvents,
       onDone: () async => await leaveRoom(),
@@ -176,6 +178,8 @@ class RoomProvider extends ChangeNotifier {
   }
 
   Future<bool> leaveRoom() async {
+    final connectionLostCallback = onConnectionLost;
+    onConnectionLost = null;
     _failure = null;
     notifyListeners();
 
@@ -189,7 +193,8 @@ class RoomProvider extends ChangeNotifier {
 
     await _roomEventsSubscription?.cancel();
     _roomEventsSubscription = null;
-    onConnectionLost?.call();
+    _roomName = null;
+    connectionLostCallback?.call();
 
     notifyListeners();
     return true;
