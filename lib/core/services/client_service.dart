@@ -2,8 +2,8 @@ import 'dart:async';
 
 import 'package:web_socket/web_socket.dart';
 
-import '../core/errors/exceptions.dart';
-import '../models/events/app_event.dart';
+import '../errors/exceptions.dart';
+import '../models/app_event.dart';
 
 class ClientService {
   WebSocket? _socket;

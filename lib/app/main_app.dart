@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../core/injectors/service_locator.dart';
-import '../screens/home_screen.dart';
+import '../features/room/presentation/screens/home_screen.dart';
 
 class MainApp extends StatelessWidget {
   const MainApp({super.key});

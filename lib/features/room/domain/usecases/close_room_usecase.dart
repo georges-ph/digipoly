@@ -1,6 +1,6 @@
-import '../core/errors/failures.dart';
+import '../../../../core/errors/failures.dart';
+import '../../../../core/usecases/usecase.dart';
 import '../repositories/room_repository.dart';
-import 'usecase.dart';
 
 class CloseRoomUsecase implements Usecase<bool, NoParams> {
   final RoomRepository _roomRepository;

@@ -1,22 +1,14 @@
-import '../core/errors/exceptions.dart';
-import '../core/errors/failures.dart';
-import '../models/discovered_room.dart';
-import '../models/events/app_event.dart';
-import '../models/player.dart';
-import '../services/client_service.dart';
-import '../services/device_service.dart';
-import '../services/discovery_service.dart';
-import '../services/network_service.dart';
-import '../services/server_service.dart';
-
-abstract class RoomRepository {
-  Future<(Failure? failure, (String roomName, Stream<RoomEvent> events)?)> createRoom();
-  Future<(Failure? failure, bool closed)> closeRoom();
-  Future<(Failure? failure, Stream<DiscoveredRoom>? roomsStream)> startDiscovery();
-  Future<(Failure? failure, Stream<RoomEvent>?)> joinRoom(String address, int port);
-  Future<(Failure? failure, bool stopped)> stopDiscovery();
-  Future<(Failure? failure, bool left)> leaveRoom();
-}
+import '../../../../core/errors/exceptions.dart';
+import '../../../../core/errors/failures.dart';
+import '../../../../core/models/app_event.dart';
+import '../../../../core/services/client_service.dart';
+import '../../../../core/services/device_service.dart';
+import '../../../../core/services/discovery_service.dart';
+import '../../../../core/services/network_service.dart';
+import '../../../../core/services/server_service.dart';
+import '../../domain/entities/discovered_room.dart';
+import '../../domain/entities/player.dart';
+import '../../domain/repositories/room_repository.dart';
 
 class RoomRepositoryImpl implements RoomRepository {
   final NetworkService _networkService;

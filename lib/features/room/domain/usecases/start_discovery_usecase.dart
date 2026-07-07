@@ -1,7 +1,7 @@
-import '../core/errors/failures.dart';
-import '../models/discovered_room.dart';
+import '../../../../core/errors/failures.dart';
+import '../../../../core/usecases/usecase.dart';
+import '../entities/discovered_room.dart';
 import '../repositories/room_repository.dart';
-import 'usecase.dart';
 
 class StartDiscoveryUsecase implements Usecase<Stream<DiscoveredRoom>, NoParams> {
   final RoomRepository _roomRepository;

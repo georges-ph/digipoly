@@ -2,17 +2,17 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
-import '../core/errors/failures.dart';
-import '../models/discovered_room.dart';
-import '../models/events/app_event.dart';
-import '../models/player.dart';
-import '../usecases/close_room_usecase.dart';
-import '../usecases/create_room_usecase.dart';
-import '../usecases/join_room_usecase.dart';
-import '../usecases/leave_room_usecase.dart';
-import '../usecases/start_discovery_usecase.dart';
-import '../usecases/stop_discovery_usecase.dart';
-import '../usecases/usecase.dart';
+import '../../../../core/errors/failures.dart';
+import '../../../../core/models/app_event.dart';
+import '../../../../core/usecases/usecase.dart';
+import '../../domain/entities/discovered_room.dart';
+import '../../domain/entities/player.dart';
+import '../../domain/usecases/close_room_usecase.dart';
+import '../../domain/usecases/create_room_usecase.dart';
+import '../../domain/usecases/join_room_usecase.dart';
+import '../../domain/usecases/leave_room_usecase.dart';
+import '../../domain/usecases/start_discovery_usecase.dart';
+import '../../domain/usecases/stop_discovery_usecase.dart';
 
 class RoomProvider extends ChangeNotifier {
   final CreateRoomUsecase _createRoomUsecase;

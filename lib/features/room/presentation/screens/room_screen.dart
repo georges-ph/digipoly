@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import '../core/extensions/context_extensions.dart';
-import '../models/discovered_room.dart';
-import '../models/player.dart';
+import '../../../../core/extensions/context_extensions.dart';
+import '../../domain/entities/discovered_room.dart';
+import '../../domain/entities/player.dart';
 import '../providers/room_provider.dart';
 
 class RoomScreen extends StatelessWidget {

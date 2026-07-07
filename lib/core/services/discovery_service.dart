@@ -2,8 +2,8 @@ import 'dart:async';
 
 import 'package:bonsoir/bonsoir.dart';
 
-import '../core/errors/exceptions.dart';
-import '../models/discovered_room.dart';
+import '../../features/room/domain/entities/discovered_room.dart';
+import '../errors/exceptions.dart';
 
 class DiscoveryService {
   final _type = "_digipoly-mdns._tcp";

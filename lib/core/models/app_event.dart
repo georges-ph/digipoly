@@ -1,8 +1,8 @@
 import 'dart:convert';
 
-import '../player.dart';
+import '../../features/room/domain/entities/player.dart';
 
-part 'room_event.dart';
+part '../../features/room/domain/entities/room_event.dart';
 
 enum AppEventType { unknown, joinRoom, leaveRoom, closeRoom }
 

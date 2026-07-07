@@ -1,7 +1,7 @@
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:network_info_plus/network_info_plus.dart';
 
-import '../core/errors/exceptions.dart';
+import '../errors/exceptions.dart';
 
 class NetworkService {
   final Connectivity _connectivity;

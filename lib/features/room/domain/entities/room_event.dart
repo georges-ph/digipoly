@@ -1,4 +1,4 @@
-part of 'app_event.dart';
+part of '../../../../core/models/app_event.dart';
 
 sealed class RoomEvent extends AppEvent {
   const RoomEvent(super.type);

@@ -1,7 +1,7 @@
-import '../core/errors/failures.dart';
-import '../models/events/app_event.dart';
+import '../../../../core/errors/failures.dart';
+import '../../../../core/models/app_event.dart';
+import '../../../../core/usecases/usecase.dart';
 import '../repositories/room_repository.dart';
-import 'usecase.dart';
 
 class JoinRoomUsecase implements Usecase<Stream<RoomEvent>, JoinRoomParams> {
   final RoomRepository _roomRepository;
