@@ -1,0 +1,330 @@
+# Digipoly — Project Context
+
+> Read this file to get full context about the app: the idea, the rules it
+> implements, how it's built, and the decisions behind it. It reflects the
+> actual code; update it when architecture or rules change.
+
+## What it is
+
+Digital banking for **physical** Monopoly-style board games. Players keep the
+real board, tokens and cards on the table, but all money lives in the app —
+like a real mobile banking app (the UI deliberately imitates fintech apps:
+gradient balance card, send/request flows, activity feed, payment cards, QR).
+
+Everything runs on the **local network only**: no accounts, no internet, no
+central server. Game nights often have no internet — nothing may depend on it
+(this is why runtime-fetched Google Fonts were removed: their per-weight
+loads re-layout the app and fail offline).
+
+The app is board-agnostic: a **Board** is plain JSON data (currency symbol,
+starting balance, GO salary, properties with rent tiers, Chance/Community
+Chest card decks). It was built and tested against a custom, non-Classic
+board — boards with different names/currencies/properties must all work.
+
+## Core architecture (server-authoritative)
+
+- One device **hosts** a room: it runs `GameServer` (shelf + shelf_web_socket)
+  and is the single source of truth. It validates every intent via
+  `GameEngine`, persists, then **broadcasts events to everyone — including
+  the sender**. Clients never write state locally first.
+- The host device participates through a normal `GameClient` pointed at
+  `127.0.0.1` — one code path for host and guests.
+- On (re)connect the server sends a full **snapshot** (game+board, players,
+  transactions, ownerships, current turn, last dice roll) and the client
+  replaces its local copy wholesale.
+- **Identity ≠ connection**: each device has a permanent UUID
+  (`IdentityService`, shared_preferences). Sockets can die and reconnect;
+  the seat and balance survive. "Leave game" is an explicit action.
+- Server pings every 5s (`webSocketHandler(pingInterval:)`) so force-closed
+  phones are detected and marked offline.
+- Clients auto-reconnect (4s timer) while a session is resumable.
+- Rooms are advertised via mDNS (`bonsoir`, `_digipoly._tcp`), with manual
+  IP entry as fallback. Port is always tried at **47912** first
+  (`GameServer.defaultPort`); the room-info sheet shows the IP big and the
+  full join link small, and copying copies the **link**.
+
+## Game rules implemented
+
+- **Turn flow (user-chosen rule)**: a turn is *housekeep → roll → resolve
+  the landing → end*. Two gates in `GameProvider`:
+  - `canAct` (my turn, **before** the roll): building/selling houses only.
+  - `canResolve` (my turn, before **or** after the roll): every money move
+    — free-form sends, collecting from the bank, Scan & pay — and landing
+    effects: buying the square you're on, paying its rent, Chance/Community
+    Chest, Pass GO. Post-roll sends matter because taxes and card effects
+    ("pay each player…") are settled via Send after landing.
+  "End turn" stays disabled until you rolled (enforced server-side too).
+  Exceptions: **requesting money and answering a money request are allowed
+  anytime** (like showing a Receive code).
+- **Dice are server-side**: one roll per turn, only by the current player
+  (`rollDice`/`diceRolled`), same result on every device, shown on the
+  balance-card turn chip, dice sheet and dashboard. **Doubles roll again**:
+  a double leaves the turn un-rolled server-side, so the player gets (and,
+  since ending requires a roll, must take) another throw. No three-doubles jail
+  (jail isn't modeled).
+- **Properties**: buy (list price), build houses 0–4 + hotel (=5). Building
+  requires owning the **whole color group** and follows the **even-building
+  rule**: no street of the group may end up more than one house apart from
+  another — building spreads across the group, selling comes off the
+  tallest first (hotel counts as 5). Hotel only via 4 houses (stepper is
+  ±1). Sell-back refunds half. Rent auto-computed: street tiers, double
+  base rent on a full unbuilt group, railroads by count owned, utilities =
+  multiplier × dice (uses the payer's own in-app roll automatically).
+- **Auctions settle in-app, run at the table**: the app tracks no token
+  positions, so it can't know someone declined to buy — the table holds
+  the auction out loud (physical-game style) and the winner opens the
+  unowned property's sheet → "Won an auction? Buy at your bid" → types the
+  winning bid and buys at that price (`buyProperty` intent with optional
+  `price`; not turn-gated, since auctions arise on other players' turns;
+  the transaction is noted "Auction").
+- **Trades (property transfer)**: the owner hands a deed to another player
+  from the property sheet ("Transfer to another player" → pick → confirm).
+  No money moves — the deal's cash is a normal Send; buildings must be
+  sold first, a mortgage travels with the property. Not turn-gated (trades
+  happen anytime at the table). Wire: `transferProperty` intent; the
+  `propertyChanged` broadcast carries the intent's `txId` so the sender's
+  pending future resolves (transfers book no transaction).
+- **Mortgages**: the owner mortgages a property from its sheet — the bank
+  pays `mortgageValue`; while mortgaged no rent is due (computeRent
+  rejects, visitors see a "Mortgaged" note, list shows a badge), streets
+  need the whole group building-free to mortgage and unmortgaged to build.
+  Lifting costs value + 10% interest (`GameEngine.mortgageLiftCost`).
+  Allowed the whole turn (`canResolve`, like other bank moves).
+- **Money requests**: requester → server → target sees an approval dialog
+  anywhere in the app; accepting sends a normal validated payment carrying
+  the requestId. Server rejects upfront if target can't afford it; auto-
+  declines (notifying both sides) if the accepted payment fails; requester
+  backing out **withdraws** the request. Both sides' UI auto-dismisses.
+- **Chance / Community Chest**: quick actions draw a random card from the
+  board's deck **on the server**; revealed in a dialog on every device;
+  money effect auto-applied as a `card` transaction. Boards with empty decks
+  get a hint to add cards in the editor.
+- **Pass GO**: salary, with a "landed exactly on GO = double" option.
+- **Not modeled on purpose**: jail (physical get-out-of-jail cards; selling
+  one = plain payment), taxes (pay via Send → Bank with a note),
+  bankruptcy, structured trade offers (property transfer + Send covers
+  trades manually), in-app auction bidding (the auction itself happens at
+  the table; only the settlement is in-app) — all candidates for later.
+- The **bank** is account id `"bank"` with infinite money; anyone may
+  trigger bank payouts (like trusting the physical banker).
+
+## Money & data model (`lib/models/`)
+
+All amounts are `int`. All models are hand-written JSON (`toJson`/`fromJson`)
+— **no codegen/build_runner, no dartz; errors use records**:
+`typedef Result<T>` in `models/result.dart` with `ok()`, `err()`, `.isOk`,
+`.error`, `.requireValue`.
+
+- `board.dart` — `Board` (currency, startingBalance, salary, properties,
+  chanceCards/communityChestCards) + `BoardCard` (text, amount: + collect /
+  − pay / 0 none) + `Board.classic()` template.
+- `property.dart` — `Property` (kind: street/railroad/utility, colorValue,
+  price, rentTiers, housePrice, mortgageValue).
+- `player.dart` — id (device UUID), name, balance, seat (join order = turn
+  order), isHost/isOnline/hasLeft. `Player.bankId == 'bank'`.
+- `game.dart` — `Game` (board travels inside it), `GameRecord` (local role:
+  host/client, host address, myPlayerId), `GameSnapshot`.
+- `game_transaction.dart` — typed: payment, rent, purchase, salary, house,
+  request, card, mortgage; optional propertyId; note.
+- `property_ownership.dart` — propertyId → ownerId + houses (5 = hotel) +
+  mortgaged.
+- `money_request.dart`, `dice_roll.dart`, `ws_message.dart` (envelope:
+  `{type, payload}` with `MessageType` enum).
+
+## Protocol (`ws_message.dart`)
+
+Intents (client→server): `joinRequest`, `paymentIntent` (optional requestId
+settles a money request), `buyProperty` (optional price = auction bid),
+`payRent` (optional payerId = owner-side POS charge), `setHouses`,
+`mortgage` (propertyId + mortgage bool), `transferProperty` (propertyId +
+toId; resolves via propertyChanged's txId), `moneyRequest`, `moneyRequestResponse` (decline by target / withdraw by
+requester), `rollDice`, `drawCard`, `endTurn`, `leaveGame`.
+
+Events (server→client): `joinAccepted`/`joinRejected`, `snapshot`,
+`paymentApplied` (tx + full player list), `paymentRejected`,
+`propertyChanged`, `moneyRequested`, `moneyRequestResolved` (sent to BOTH
+parties), `diceRolled`, `cardDrawn`, `turnChanged`, `playerJoined`,
+`playerLeft`, `presenceChanged`, `gameClosed`.
+
+Intent ids (txId) make retries idempotent; pending intents resolve via
+completers in `GameProvider` with timeouts.
+
+## Services (`lib/services/`) — logic lives here, screens stay thin
+
+- `game_engine.dart` — pure rules: applyPayment, validatePurchase,
+  computeRent, validateHouses (group rule), nextTurn. Unit-tested.
+- `game_server.dart` — sockets + state + persistence + broadcast; also
+  serves the bundled web app; dice + card draws happen here.
+- `game_client.dart` — transport only (web_socket_channel).
+- `database_service.dart` — sqflite; v3 schema: `boards`, `games`
+  (+current_turn_id, last_roll, turn_rolled — roll state survives a host
+  restart, so reopening the app mid-turn doesn't grant a fresh roll),
+  `players`, `game_transactions`, `game_properties` (all JSON columns). Desktop = sqflite_common_ffi; web =
+  sqflite_common_ffi_web (needs `web/sqflite_sw.js` + `web/sqlite3.wasm`,
+  installed via `dart run sqflite_common_ffi_web:setup`). Host's DB is the
+  record; clients cache snapshots/events for offline viewing and resume.
+- `discovery_service.dart` — bonsoir advertise/browse (not on web).
+  Services are named by **game id** (display names collide and mDNS
+  auto-renames, creating duplicates); rooms are keyed by game id and only
+  listed after a quick TCP probe succeeds (mDNS caches outlive
+  force-closed hosts, which used to leave ghost rooms).
+- `identity_service.dart` — device UUID + display name.
+- `nfc_service.dart` — see NFC below.
+
+## Providers (`lib/providers/`, package:provider)
+
+- `GameProvider` — THE session object (host or client): state, all actions
+  (sendPayment/collectSalary/buyProperty/payRent/setHouses/requestMoney/
+  respondToIncomingRequest/rollDice/drawCard/endTurn), reconnect, LAN IP
+  (`roomEndpoint` — network_info_plus with NetworkInterface fallback for
+  Windows), `errors` + `cardDraws` streams,
+  `canAct`/`canResolve`/`canRoll`/`canEndTurn`.
+- `GamesProvider` (home list), `BoardsProvider` (board CRUD).
+
+## Screens & UX conventions
+
+Flat layout: `lib/screens`, `lib/widgets`, `lib/theme`, `lib/utils`.
+
+- `home_screen` → `games_tab` (games list; "Live" badge = actually connected
+  now; tapping opens instantly and connects in background) + `boards_tab`
+  (editor, Classic template, duplicate, clipboard copy/paste, file
+  import/export via file_selector — desktop-only save dialog).
+- `game_screen` — the banking app: balance card (connection chip + turn pill
+  with dice result), roll/end-turn row (only on my turn), 8 quick actions
+  (Send, Request, Scan & pay, Receive, Pass GO, Collect, Chance, Chest —
+  Send/Scan/Collect/GO/Chance/Chest gated by `canResolve`,
+  Request/Receive never), players row (balances under names, accent
+  ring = current turn, long-press → send/request/payment card), properties
+  summary, activity teaser (10) → `activity_screen` (full). **Responsive**:
+  ≥900px fills the whole window — banking column (flex 7, 8-column quick
+  actions) + activity pane (flex 3); narrow stays a max-640 column.
+  Global listeners here: incoming-request dialog, card-drawn dialog, NFC
+  watch (only acts when this screen is top-most).
+- `properties_screen` — search, ownership list, per-property sheet (rent
+  table, buy/pay-rent/build with **confirmation dialogs**, errors shown
+  inside the sheet, NFC write).
+- `send_money_screen` — modes pay/collect/request; recipient bubbles; keypad
+  (`00` appends atomically); request mode shows the target's balance and
+  blocks over-asking; NFC tap-to-pay (amount first → tap card → confirm).
+- `dashboard_screen` — table-wide view for big screens (players grid, turn +
+  dice banner, shared activity feed).
+- `scan_pay_screen` (mobile_scanner; `canScanQr` excludes Windows/Linux),
+  `receive_money_sheet` (my QR, optional fixed amount, auto-closes when
+  paid), `web_join_screen`, `host/join/board_editor` screens.
+- Widgets: `balance_card` (trailing + footer slots), `transaction_tile` →
+  `transaction_details_sheet`, `activity_feed.dart`
+  (`buildActivityFeed(context, session, limit)` — day headers + running
+  balance, shared by game/dashboard/activity), `player_card_sheet` (debit-
+  card styled, "Register a physical card"), `player_avatar` (presence dot,
+  highlight ring), `amount_keypad`, `section_header`, `empty_state`.
+- Theme (`app_theme.dart`): violet fintech accent #635BFF, hero gradient,
+  radius 22, light+dark, **platform font only** (no google_fonts —
+  offline + flicker), `FloatingLabelBehavior.always` (narrow numeric fields
+  clip full-size labels). Money formatting via `utils/formatting.dart`
+  (intl): formatMoney/formatSignedMoney/formatWhen/formatDay. All
+  snackbars go through `utils/snack.dart` (`showSnack`/`showSnackWith`):
+  the previous bar is removed instantly, 2s duration — never queue.
+
+## NFC (Android)
+
+`NfcService.instance` (singleton — one radio). Payloads are NDEF text:
+`digipoly:prop:<boardId>:<propertyId>` and `digipoly:player:<playerId>`
+(player cards work across games). Parsed to sealed `NfcCardData`.
+
+- A **persistent watch session** runs while `game_screen` is open: tapping
+  any Digipoly card just works (property → its sheet; player → Send
+  prefilled, turn-gated) AND keeps Android's system "new tag" UI away (an
+  active reader session owns the radio). The watch only fires when the game
+  screen is the top route — pushed screens have their own affordances.
+- One-shot read/write ops (register cards, send-screen recipient pick)
+  pause the watch and hand the radio back after; the session lingers 3s
+  after one-shots so the system UI can't grab the still-present tag.
+- **POS mode in the property sheet**: while a property's sheet is open it
+  takes over the watch (`setWatchOverride`/`clearWatchOverride`) — tapping
+  that property's card or your own payment card triggers the primary
+  action (buy if unowned, pay rent if someone else's), with the normal
+  confirmation dialog. Wrong cards / not-your-turn show an inline hint.
+- **Owner-side POS (charge rent by tap)**: when the sheet's property is
+  *mine*, my device is the terminal — another player taps *their* payment
+  card on it and their account is charged the rent (confirmation dialog on
+  my side; the tap is the payer's authorization, like tap-to-pay). Wire:
+  `payRent` intent with optional `payerId`; the server only accepts it
+  from the property's owner, uses the payer's in-app roll for utilities,
+  and books the transaction payer → owner as usual.
+- Cancel resolves pending ops with sentinel `NfcService.cancelled` (flows
+  treat it as silence). Errors truncated to 90 chars.
+- Manifest: NFC permission (feature optional), plus an NDEF_DISCOVERED
+  text/plain intent-filter so taps outside the app open Digipoly instead of
+  the system sheet.
+- Design note: cards identify their **owner** (tap someone's card to pay
+  them) — the inverse of Hasbro's banker unit. "POS mode + PIN" is a
+  possible future feature.
+- **Web NFC is a dead end for the iOS-web audience**: the Web NFC API
+  exists only in Chrome on Android; iOS Safari/WebKit exposes no NFC to web
+  pages at all (Apple keeps Core NFC native-only). Since the web build
+  exists precisely for iPhones (APK sideload covers Android), web NFC is
+  not implemented — iOS web users pay via QR (scan + Receive both work in
+  the browser).
+
+## QR payments & web join
+
+- `utils/pay_code.dart`: `digipoly:pay:<gameId>:<playerId>:<amount>`
+  (amount 0 = payer types it). Receive sheet shows it; scan screen parses
+  it → Send prefilled.
+- Room QR (game app bar) encodes `http://<ip>:47912/`; the same link is
+  what the room-info sheet copies, and the Join screen's manual field
+  accepts a pasted link as well as a bare IP.
+  The server can serve the **web app itself**: `tool/bundle_web_app.ps1|.sh`
+  builds web + zips into `assets/web/web_app.zip` (gitignored); server
+  serves it via a shelf Cascade. Scanning the QR on any phone opens the
+  game in the browser → `web_join_screen` asks a name → joins directly.
+  `main.dart` detects this by checking whether the page's own origin
+  (`Uri.base`) is a plain-http LAN address rather than parsing any query
+  params.
+- Web builds can't host (dart:io throws at runtime, guarded by kIsWeb) or
+  use NFC/mDNS; sqlite works via the wasm worker files in `web/`.
+
+## Platform matrix
+
+| Capability | Windows | Android | Web |
+|---|---|---|---|
+| Host a room | ✅ | ✅ | ❌ |
+| Join | ✅ | ✅ | ✅ (QR/URL or manual IP) |
+| mDNS discovery | ✅ | ✅ | ❌ (manual/URL only) |
+| NFC | ❌ | ✅ | ❌ |
+| QR scanning | ❌ (`canScanQr`) | ✅ | ✅ |
+| Show QR codes | ✅ | ✅ | ✅ |
+
+## Dev workflow
+
+```
+flutter pub get
+flutter run                  # Windows or Android
+flutter analyze && flutter test    # keep both clean (engine has unit tests)
+./tool/bundle_web_app.sh     # optional: embed web build for browser-join
+```
+
+Android manifest already has INTERNET/multicast/NFC permissions. iOS folder
+doesn't exist (would need bonsoir Info.plist keys + NFC entitlements).
+
+## Conventions (important)
+
+- No code generation / build_runner. No dartz — Dart records for results.
+- Flat `lib/` structure (no feature folders / clean-architecture layers);
+  separation of concerns by class.
+- provider for state; every addition should push toward "a real banking
+  app" look & feel; clean modern UI, not basic.
+- Verify with `flutter analyze` + `flutter test` after changes.
+
+## Roadmap / not yet implemented
+
+Structured trade offers (property+cash in one accepted bundle — plain
+transfer + Send exists), bankruptcy flow,
+live auction bidding UI, tax squares on the board model (some boards have
+them), settings screen
+(profile, theme, per-game house-rule toggles — e.g. make the strict
+turn-gating optional, Free Parking pot, double-GO), POS mode with PIN for
+cards, net-worth stats/charts from the transaction log, game-end summary,
+sounds/haptics, spectator (view-only dashboard for a TV), community board
+catalog (currently P2P: boards travel with games, clipboard text, .json
+files; no central server by design).

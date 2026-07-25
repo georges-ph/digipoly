@@ -43,3 +43,6 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Bundled web build served by the game server (created by tool/bundle_web_app)
+assets/web/web_app.zip
