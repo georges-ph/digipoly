@@ -34,6 +34,8 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.14.4
+  flutter_native_splash: ^2.4.7
 
 flutter:
   uses-material-design: true
@@ -41,3 +43,38 @@ flutter:
     # Optional: the web build zipped by tool/bundle_web_app, served by the
     # game server so browsers can join by scanning the room QR.
     - assets/web/
+
+# Regenerate after changing assets/icon/*: `dart run flutter_launcher_icons`
+flutter_launcher_icons:
+  image_path: "assets/icon/icon.png"
+  android: true
+  ios: false
+  adaptive_icon_background: "#635BFF"
+  adaptive_icon_foreground: "assets/icon/icon_foreground.png"
+  min_sdk_android: 21
+  windows:
+    generate: true
+    image_path: "assets/icon/icon.png"
+    icon_size: 256
+  web:
+    generate: true
+    image_path: "assets/icon/icon.png"
+    background_color: "#635BFF"
+    theme_color: "#635BFF"
+
+# Regenerate after changing assets/icon/*: `dart run flutter_native_splash:create`
+# Android 12+ ignores the plain color/image above and uses the android_12
+# section instead (a different, OS-level splash API).
+flutter_native_splash:
+  color: "#635BFF"
+  image: assets/icon/icon_foreground.png
+  color_dark: "#0B0D14"
+  image_dark: assets/icon/icon_foreground.png
+  android_12:
+    image: assets/icon/icon_foreground.png
+    icon_background_color: "#635BFF"
+    image_dark: assets/icon/icon_foreground.png
+    icon_background_color_dark: "#0B0D14"
+  android: true
+  ios: false
+  web: false

@@ -115,7 +115,7 @@ class _PropertiesScreenState extends State<PropertiesScreen> {
           ),
         );
       case null:
-        _snack('Not a Digipoly card.');
+        _snack('Not a digipoly card.');
     }
   }
 

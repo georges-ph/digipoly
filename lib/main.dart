@@ -66,7 +66,7 @@ class DigipolyApp extends StatelessWidget {
         ),
       ],
       child: MaterialApp(
-        title: 'Digipoly',
+        title: 'digipoly',
         debugShowCheckedModeBanner: false,
         theme: AppTheme.light(),
         darkTheme: AppTheme.dark(),

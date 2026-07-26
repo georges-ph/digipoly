@@ -3,9 +3,9 @@
     "short_name": "digipoly",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "background_color": "#635BFF",
+    "theme_color": "#635BFF",
+    "description": "Digital banking for physical board games.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

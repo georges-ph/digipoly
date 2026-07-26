@@ -28,7 +28,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Digipoly'),
+        title: const Text('digipoly'),
         actions: [
           Padding(
             padding: const EdgeInsets.only(right: 16),

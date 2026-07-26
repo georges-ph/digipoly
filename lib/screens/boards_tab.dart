@@ -79,7 +79,7 @@ class BoardsTab extends StatelessWidget {
     try {
       final file = await openFile(
         acceptedTypeGroups: const [
-          XTypeGroup(label: 'Digipoly board', extensions: ['json']),
+          XTypeGroup(label: 'digipoly board', extensions: ['json']),
         ],
       );
       if (file == null) return null;
@@ -89,7 +89,7 @@ class BoardsTab extends StatelessWidget {
       return Board.fromJson(json);
     } catch (_) {
       if (context.mounted) {
-        showSnack(context, 'That file is not a Digipoly board.');
+        showSnack(context, 'That file is not a digipoly board.');
       }
       return null;
     }
@@ -185,7 +185,7 @@ class BoardsTab extends StatelessWidget {
           suggestedName:
               '${safeName.isEmpty ? 'board' : safeName}.digipoly.json',
           acceptedTypeGroups: const [
-            XTypeGroup(label: 'Digipoly board', extensions: ['json']),
+            XTypeGroup(label: 'digipoly board', extensions: ['json']),
           ],
         );
         if (location == null) return;

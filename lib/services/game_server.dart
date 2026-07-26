@@ -159,7 +159,7 @@ class GameServer {
     final files = _webApp;
     if (files == null) {
       return Response.ok(
-        'Digipoly room server. Join from the app on the same network.',
+        'digipoly room server. Join from the app on the same network.',
       );
     }
     var path = request.url.path;
