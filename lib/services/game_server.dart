@@ -14,6 +14,7 @@ import '../models/game.dart';
 import '../models/game_transaction.dart';
 import '../models/money_request.dart';
 import '../models/player.dart';
+import '../models/property.dart';
 import '../models/property_ownership.dart';
 import '../models/result.dart';
 import '../models/ws_message.dart';
@@ -46,6 +47,7 @@ class GameServer {
   String? _currentTurnId;
   DiceRoll? _lastRoll;
   bool _turnRolled = false;
+  int _freeParkingPot = 0;
   final _random = Random();
 
   final Map<String, WebSocketChannel> _connections = {};
@@ -67,6 +69,7 @@ class GameServer {
     String? currentTurnId,
     DiceRoll? lastRoll,
     bool turnRolled = false,
+    int freeParkingPot = 0,
   }) async {
     if (isRunning) await stop();
 
@@ -88,6 +91,7 @@ class GameServer {
     _currentTurnId = currentTurnId;
     _lastRoll = lastRoll;
     _turnRolled = turnRolled;
+    _freeParkingPot = freeParkingPot;
 
     await _loadWebApp();
 
@@ -221,6 +225,10 @@ class GameServer {
             _handleRollDice(playerId);
           case MessageType.drawCard:
             _handleDrawCard(playerId, message.payload);
+          case MessageType.editTransactionNote:
+            _handleEditTransactionNote(playerId, channel, message.payload);
+          case MessageType.payJailFine:
+            _handlePayJailFine(playerId, channel, message.payload);
           case MessageType.endTurn:
             _handleEndTurn(playerId, channel);
           case MessageType.leaveGame:
@@ -260,6 +268,7 @@ class GameServer {
             seat: _nextSeat(),
             isHost: playerId == game.hostId,
             isOnline: true,
+            position: game.board.goIndex >= 0 ? game.board.goIndex : 0,
           )
         : existing.copyWith(
             name: name.isEmpty ? existing.name : name,
@@ -324,6 +333,7 @@ class GameServer {
     _broadcast(WsMessage(MessageType.paymentApplied, {
       'transaction': tx.toJson(),
       'players': _players.values.map((p) => p.toJson()).toList(),
+      'freeParkingPot': _freeParkingPot,
     }));
     return true;
   }
@@ -421,6 +431,39 @@ class GameServer {
     });
     _sendTo(request.requesterId, message);
     _sendTo(request.targetId, message);
+  }
+
+  /// Edits a past transaction's note — the amount and parties never change.
+  /// Either party to the transaction may add or correct it, any time.
+  void _handleEditTransactionNote(
+    String senderId,
+    WebSocketChannel channel,
+    Map<String, dynamic> payload,
+  ) {
+    final txId = payload['id'] as String?;
+    final reject = _prepareIntent(senderId, channel, txId);
+    if (reject == null) return;
+
+    final transactionId = payload['transactionId'] as String?;
+    final index = _transactions.indexWhere((t) => t.id == transactionId);
+    if (index == -1) {
+      reject('That transaction no longer exists.');
+      return;
+    }
+    final target = _transactions[index];
+    if (target.fromId != senderId && target.toId != senderId) {
+      reject('You can only edit notes on your own transactions.');
+      return;
+    }
+
+    final updated = target.copyWith(note: payload['note'] as String? ?? '');
+    _transactions[index] = updated;
+    _db.insertTransactions(_game!.id, [updated]);
+
+    _broadcast(WsMessage(MessageType.transactionNoteUpdated, {
+      'txId': txId,
+      'transaction': updated.toJson(),
+    }));
   }
 
   void _handleBuy(
@@ -750,33 +793,238 @@ class GameServer {
   /// everyone sees the same result. A double leaves the turn un-rolled:
   /// the player rolls again, and (since ending requires a roll) must do so
   /// before ending the turn.
+  ///
+  /// On a board with a curated layout (`board.goIndex != -1`) the roll also
+  /// moves the player's token and resolves whatever they land on — tax,
+  /// Free Parking, Go To Jail, Chance/Community Chest all trigger
+  /// automatically; buying/paying rent/mortgaging stay manual, as always.
+  /// A board with no layout behaves exactly as before this feature existed.
   void _handleRollDice(String senderId) {
     if (senderId != _currentTurnId || _turnRolled) return;
-    _lastRoll = DiceRoll(
+    final game = _game!;
+    final board = game.board;
+    final roll = DiceRoll(
       playerId: senderId,
       die1: _random.nextInt(6) + 1,
       die2: _random.nextInt(6) + 1,
     );
-    _turnRolled = !_lastRoll!.isDouble;
+    _lastRoll = roll;
+
+    final player = _players[senderId];
+    if (player == null || board.goIndex < 0) {
+      // No curated layout: no position tracking, no jail — just the roll.
+      _turnRolled = !roll.isDouble;
+    } else if (player.inJail) {
+      // Jail never grants the doubles-roll-again bonus.
+      _resolveJailTurn(player, roll);
+      _turnRolled = true;
+    } else {
+      _movePlayer(player, roll.total);
+      // Landing on Go To Jail cancels a doubles bonus roll.
+      _turnRolled = !roll.isDouble || _players[senderId]!.inJail;
+    }
+
     _db.setTurnState(
-      _game!.id,
+      game.id,
       currentTurnId: _currentTurnId,
       lastRoll: _lastRoll,
       turnRolled: _turnRolled,
+      freeParkingPot: _freeParkingPot,
     );
     _broadcast(WsMessage(MessageType.diceRolled, {
-      'roll': _lastRoll!.toJson(),
+      'roll': roll.toJson(),
       'turnRolled': _turnRolled,
+      'players': _players.values.map((p) => p.toJson()).toList(),
+      'freeParkingPot': _freeParkingPot,
     }));
   }
 
-  /// Draws a random card from the board's deck, shows it to the whole
-  /// table and applies its money effect as a bank transaction.
-  void _handleDrawCard(String senderId, Map<String, dynamic> payload) {
-    final game = _game;
-    if (game == null || senderId != _currentTurnId) return;
+  /// Advances [player]'s token by [total] squares, auto-pays salary if GO
+  /// was passed or landed on exactly, then resolves the landing square.
+  void _movePlayer(Player player, int total) {
+    final game = _game!;
+    final board = game.board;
+    final advance = GameEngine.advancePosition(
+      squareCount: board.properties.length,
+      currentPosition: player.position,
+      total: total,
+      goIndex: board.goIndex,
+    );
+    var current = player.copyWith(position: advance.position);
+    _players[current.id] = current;
 
-    final deck = payload['deck'] as String? ?? 'chance';
+    if (advance.crossedGo && board.salary > 0) {
+      final tx = GameTransaction(
+        id: const Uuid().v4(),
+        gameId: game.id,
+        fromId: Player.bankId,
+        toId: current.id,
+        amount: board.salary * (advance.landedOnGo ? 2 : 1),
+        type: TransactionType.salary,
+        timestamp: DateTime.now(),
+        note: advance.landedOnGo ? 'Landed on GO' : 'Passed GO',
+      );
+      _applyTransaction(tx, (_) {}); // bank-funded; cannot fail
+      current = _players[current.id]!;
+    }
+
+    _db.upsertPlayers(game.id, [current]);
+    _resolveLanding(current, board.properties[advance.position]);
+  }
+
+  /// Auto-effects for the square a token just landed on. Ownable squares
+  /// (street/railroad/utility) and plain GO/Jail have no auto-effect —
+  /// buying, paying rent, and mortgaging all stay manual and confirmed.
+  void _resolveLanding(Player player, Property square) {
+    final game = _game!;
+    switch (square.kind) {
+      case PropertyKind.tax:
+        final amount = square.price;
+        if (amount <= 0) return;
+        final tx = GameTransaction(
+          id: const Uuid().v4(),
+          gameId: game.id,
+          fromId: player.id,
+          toId: Player.bankId,
+          amount: amount,
+          type: TransactionType.tax,
+          timestamp: DateTime.now(),
+          note: square.name,
+        );
+        final applied = _applyTransaction(
+          tx,
+          (reason) => _sendTo(player.id, WsMessage(MessageType.paymentRejected, {
+            'txId': tx.id,
+            'reason': reason,
+          })),
+        );
+        if (applied) _freeParkingPot += amount;
+      case PropertyKind.freeParking:
+        if (_freeParkingPot <= 0) return;
+        final tx = GameTransaction(
+          id: const Uuid().v4(),
+          gameId: game.id,
+          fromId: Player.bankId,
+          toId: player.id,
+          amount: _freeParkingPot,
+          type: TransactionType.freeParking,
+          timestamp: DateTime.now(),
+        );
+        if (_applyTransaction(tx, (_) {})) _freeParkingPot = 0;
+      case PropertyKind.goToJail:
+        final jailIndex = game.board.jailIndex;
+        if (jailIndex < 0) return;
+        final jailed = player.copyWith(
+          position: jailIndex,
+          inJail: true,
+          jailTurns: 0,
+        );
+        _players[jailed.id] = jailed;
+        _db.upsertPlayers(game.id, [jailed]);
+      case PropertyKind.chance:
+        _drawCardFor(player.id, 'chance');
+      case PropertyKind.communityChest:
+        _drawCardFor(player.id, 'chest');
+      case PropertyKind.street:
+      case PropertyKind.railroad:
+      case PropertyKind.utility:
+      case PropertyKind.go:
+      case PropertyKind.jail:
+        break;
+    }
+  }
+
+  /// Resolves one roll attempted from jail: doubles escape free and move;
+  /// the 3rd failed attempt forces paying the fine and moves anyway.
+  void _resolveJailTurn(Player player, DiceRoll roll) {
+    final game = _game!;
+    final outcome = GameEngine.resolveJailRoll(
+      jailTurns: player.jailTurns,
+      isDouble: roll.isDouble,
+    );
+    switch (outcome) {
+      case JailRollOutcome.stillStuck:
+        final stuck = player.copyWith(jailTurns: player.jailTurns + 1);
+        _players[stuck.id] = stuck;
+        _db.upsertPlayers(game.id, [stuck]);
+      case JailRollOutcome.escaped:
+        final freed = player.copyWith(inJail: false, jailTurns: 0);
+        _players[freed.id] = freed;
+        _movePlayer(freed, roll.total);
+      case JailRollOutcome.mustPayNow:
+        final freed = player.copyWith(inJail: false, jailTurns: 0);
+        _players[freed.id] = freed;
+        final tx = GameTransaction(
+          id: const Uuid().v4(),
+          gameId: game.id,
+          fromId: freed.id,
+          toId: Player.bankId,
+          amount: game.board.jailFine,
+          type: TransactionType.tax,
+          timestamp: DateTime.now(),
+          note: 'Jail fine',
+        );
+        final applied = _applyTransaction(
+          tx,
+          (reason) => _sendTo(freed.id, WsMessage(MessageType.paymentRejected, {
+            'txId': tx.id,
+            'reason': reason,
+          })),
+        );
+        if (applied) _freeParkingPot += game.board.jailFine;
+        _movePlayer(_players[freed.id]!, roll.total);
+    }
+  }
+
+  void _handlePayJailFine(
+    String senderId,
+    WebSocketChannel channel,
+    Map<String, dynamic> payload,
+  ) {
+    final txId = payload['id'] as String?;
+    final reject = _prepareIntent(senderId, channel, txId);
+    if (reject == null) return;
+
+    final player = _players[senderId]!;
+    if (senderId != _currentTurnId || !player.inJail || _turnRolled) {
+      reject("You're not stuck in jail right now.");
+      return;
+    }
+
+    final game = _game!;
+    // Clear the jail state first so the transaction's single broadcast
+    // already carries the freed player, rather than a second broadcast.
+    _players[senderId] = player.copyWith(inJail: false, jailTurns: 0);
+
+    final tx = GameTransaction(
+      id: txId!,
+      gameId: game.id,
+      fromId: senderId,
+      toId: Player.bankId,
+      amount: game.board.jailFine,
+      type: TransactionType.tax,
+      timestamp: DateTime.now(),
+      note: 'Jail fine',
+    );
+    if (!_applyTransaction(tx, reject)) {
+      _players[senderId] = player; // roll back — the fine wasn't paid
+      return;
+    }
+    _freeParkingPot += game.board.jailFine;
+    _db.setTurnState(
+      game.id,
+      currentTurnId: _currentTurnId,
+      lastRoll: _lastRoll,
+      turnRolled: _turnRolled,
+      freeParkingPot: _freeParkingPot,
+    );
+  }
+
+  /// Draws a random card from the board's deck, shows it to the whole
+  /// table and applies its money effect as a bank transaction. Called both
+  /// for a manual Chance/Chest quick action and for auto-landing on one.
+  void _drawCardFor(String playerId, String deck) {
+    final game = _game!;
     final cards = deck == 'chest'
         ? game.board.communityChestCards
         : game.board.chanceCards;
@@ -784,7 +1032,7 @@ class GameServer {
     final card = cards[_random.nextInt(cards.length)];
 
     _broadcast(WsMessage(MessageType.cardDrawn, {
-      'playerId': senderId,
+      'playerId': playerId,
       'deck': deck,
       'card': card.toJson(),
     }));
@@ -793,8 +1041,8 @@ class GameServer {
     final tx = GameTransaction(
       id: const Uuid().v4(),
       gameId: game.id,
-      fromId: card.amount > 0 ? Player.bankId : senderId,
-      toId: card.amount > 0 ? senderId : Player.bankId,
+      fromId: card.amount > 0 ? Player.bankId : playerId,
+      toId: card.amount > 0 ? playerId : Player.bankId,
       amount: card.amount.abs(),
       type: TransactionType.card,
       timestamp: DateTime.now(),
@@ -803,13 +1051,20 @@ class GameServer {
     _applyTransaction(
       tx,
       (reason) => _sendTo(
-        senderId,
+        playerId,
         WsMessage(MessageType.paymentRejected, {
           'txId': tx.id,
           'reason': reason,
         }),
       ),
     );
+  }
+
+  /// Draws a card for the current player's manual Chance/Chest quick
+  /// action (boards without a layout only have this manual path).
+  void _handleDrawCard(String senderId, Map<String, dynamic> payload) {
+    if (_game == null || senderId != _currentTurnId) return;
+    _drawCardFor(senderId, payload['deck'] as String? ?? 'chance');
   }
 
   void _handleEndTurn(String senderId, WebSocketChannel channel) {
@@ -829,6 +1084,7 @@ class GameServer {
       currentTurnId: _currentTurnId,
       lastRoll: _lastRoll,
       turnRolled: false,
+      freeParkingPot: _freeParkingPot,
     );
     _broadcast(WsMessage(MessageType.turnChanged, {
       'playerId': _currentTurnId,
@@ -876,6 +1132,7 @@ class GameServer {
         currentTurnId: _currentTurnId,
         lastRoll: _lastRoll,
         turnRolled: _turnRolled,
+        freeParkingPot: _freeParkingPot,
       );
 
   void _send(WebSocketChannel channel, WsMessage message) =>

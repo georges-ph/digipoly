@@ -3,9 +3,11 @@ import 'package:intl/intl.dart';
 
 import '../models/game_transaction.dart';
 import '../models/player.dart';
+import '../models/result.dart';
 import '../providers/game_provider.dart';
 import '../theme/app_theme.dart';
 import '../utils/formatting.dart';
+import '../utils/snack.dart';
 import 'player_avatar.dart';
 
 /// Everything about one transaction: parties, type, property, note, exact
@@ -31,7 +33,49 @@ class TransactionDetailsSheet extends StatelessWidget {
         TransactionType.request => 'Requested payment',
         TransactionType.card => 'Card',
         TransactionType.mortgage => 'Mortgage',
+        TransactionType.tax => 'Tax',
+        TransactionType.freeParking => 'Free Parking',
       };
+
+  Future<void> _editNote(BuildContext context) async {
+    final controller = TextEditingController(text: transaction.note);
+    final result = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Edit note'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          maxLength: 60,
+          textCapitalization: TextCapitalization.sentences,
+          decoration: const InputDecoration(
+            hintText: 'Add a note',
+            counterText: '',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () =>
+                Navigator.pop(dialogContext, controller.text.trim()),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    if (result == null || !context.mounted) return;
+
+    final res = await session.editTransactionNote(transaction.id, result);
+    if (!context.mounted) return;
+    if (res.isOk) {
+      Navigator.of(context).pop();
+    } else {
+      showSnack(context, res.error!);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -166,7 +210,45 @@ class TransactionDetailsSheet extends StatelessWidget {
             ),
             const SizedBox(height: 14),
             if (propertyName != null) factRow('Property', propertyName),
-            if (transaction.note.isNotEmpty) factRow('Note', transaction.note),
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 6),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SizedBox(
+                    width: 90,
+                    child: Text(
+                      'Note',
+                      style: textTheme.bodySmall
+                          ?.copyWith(color: scheme.onSurfaceVariant),
+                    ),
+                  ),
+                  Expanded(
+                    child: Text(
+                      transaction.note.isEmpty ? 'No note' : transaction.note,
+                      style: textTheme.bodyMedium?.copyWith(
+                        fontWeight: FontWeight.w600,
+                        color: transaction.note.isEmpty
+                            ? scheme.onSurfaceVariant
+                            : null,
+                      ),
+                    ),
+                  ),
+                  InkWell(
+                    onTap: () => _editNote(context),
+                    borderRadius: BorderRadius.circular(20),
+                    child: Padding(
+                      padding: const EdgeInsets.all(4),
+                      child: Icon(
+                        Icons.edit_outlined,
+                        size: 18,
+                        color: scheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
             factRow(
               'When',
               DateFormat('EEEE d MMM y · HH:mm:ss')

@@ -22,6 +22,8 @@ enum MessageType {
   drawCard,
   endTurn,
   leaveGame,
+  editTransactionNote,
+  payJailFine,
 
   // Server -> client events.
   joinAccepted,
@@ -30,6 +32,7 @@ enum MessageType {
   paymentApplied,
   paymentRejected,
   propertyChanged,
+  transactionNoteUpdated,
   moneyRequested,
   moneyRequestResolved,
   diceRolled,

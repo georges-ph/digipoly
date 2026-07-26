@@ -174,11 +174,12 @@ class _PropertiesScreenState extends State<PropertiesScreen> {
     final mine = session.propertiesOwnedBy(session.myPlayerId);
     final mineValue = mine.fold<int>(0, (sum, p) => sum + p.price);
     final query = _query.trim().toLowerCase();
+    // Specials (GO, Jail, Tax, ...) aren't ownable — they live in the board
+    // view, not this buy/rent/mortgage list.
+    final ownable = board.properties.where((p) => p.kind.isOwnable);
     final visibleProperties = query.isEmpty
-        ? board.properties
-        : board.properties
-            .where((p) => p.name.toLowerCase().contains(query))
-            .toList();
+        ? ownable.toList()
+        : ownable.where((p) => p.name.toLowerCase().contains(query)).toList();
 
     return Scaffold(
       appBar: AppBar(
@@ -1201,6 +1202,14 @@ class _RentTable extends StatelessWidget {
           for (var i = 0; i < tiers.length; i++)
             ('Owning ${i + 1}', '${tiers[i]} × dice'),
         ];
+      case PropertyKind.go:
+      case PropertyKind.jail:
+      case PropertyKind.freeParking:
+      case PropertyKind.goToJail:
+      case PropertyKind.tax:
+      case PropertyKind.chance:
+      case PropertyKind.communityChest:
+        return const []; // Unreachable: this sheet only opens for ownable kinds.
     }
   }
 

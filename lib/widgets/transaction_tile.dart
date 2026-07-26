@@ -67,6 +67,12 @@ class TransactionTile extends StatelessWidget {
         return lifted
             ? '$from lifted the mortgage · $_property'
             : '$to mortgaged $_property';
+      case TransactionType.tax:
+        if (outgoing) return 'Tax paid';
+        return '$from paid tax';
+      case TransactionType.freeParking:
+        if (incoming) return 'Free Parking pot';
+        return '$to collected Free Parking';
       case TransactionType.payment:
       case TransactionType.request:
         if (incoming) return 'From $from';
@@ -82,6 +88,8 @@ class TransactionTile extends StatelessWidget {
         TransactionType.house => Icons.home_rounded,
         TransactionType.card => Icons.style_rounded,
         TransactionType.mortgage => Icons.account_balance_outlined,
+        TransactionType.tax => Icons.receipt_long_outlined,
+        TransactionType.freeParking => Icons.local_parking_rounded,
         _ => incoming
             ? Icons.south_west_rounded
             : (outgoing ? Icons.north_east_rounded : Icons.swap_horiz_rounded),

@@ -26,6 +26,7 @@ import '../widgets/player_card_sheet.dart';
 import '../widgets/receive_money_sheet.dart';
 import '../widgets/section_header.dart';
 import 'activity_screen.dart';
+import 'board_view_screen.dart';
 import 'dashboard_screen.dart';
 import 'properties_screen.dart';
 import 'scan_pay_screen.dart';
@@ -302,6 +303,13 @@ class _GameScreenState extends State<GameScreen> {
     );
   }
 
+  Future<void> _payJailFine() async {
+    final session = context.read<GameProvider>();
+    final result = await session.payJailFine();
+    if (!mounted) return;
+    if (!result.isOk) showSnack(context, result.error!);
+  }
+
   Future<void> _passGo() async {
     final session = context.read<GameProvider>();
     final board = session.game?.board;
@@ -563,6 +571,10 @@ class _GameScreenState extends State<GameScreen> {
                 case 'myCard':
                   final me = context.read<GameProvider>().me;
                   if (me != null) _showPlayerCard(me);
+                case 'board':
+                  Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const BoardViewScreen()),
+                  );
                 case 'dashboard':
                   Navigator.of(context).push(
                     MaterialPageRoute(
@@ -574,20 +586,27 @@ class _GameScreenState extends State<GameScreen> {
                   _leaveGame();
               }
             },
-            itemBuilder: (_) => const [
-              PopupMenuItem(
+            itemBuilder: (_) => [
+              const PopupMenuItem(
                 value: 'myCard',
                 child: Text('My payment card'),
               ),
-              PopupMenuItem(
+              // Only meaningful once the board has a curated layout —
+              // otherwise there are no token positions to show.
+              if (game.board.goIndex >= 0)
+                const PopupMenuItem(
+                  value: 'board',
+                  child: Text('Board'),
+                ),
+              const PopupMenuItem(
                 value: 'dashboard',
                 child: Text('Dashboard'),
               ),
-              PopupMenuItem(
+              const PopupMenuItem(
                 value: 'saveBoard',
                 child: Text('Save board to My Boards'),
               ),
-              PopupMenuItem(
+              const PopupMenuItem(
                 value: 'leave',
                 child: Text('Leave game'),
               ),
@@ -639,6 +658,36 @@ class _GameScreenState extends State<GameScreen> {
           // it's actually this player's move.
           if (session.isMyTurn) ...[
             const SizedBox(height: 14),
+            if (session.me?.inJail == true) ...[
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: scheme.surfaceContainerHigh,
+                  borderRadius: BorderRadius.circular(AppTheme.radius),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.lock_outline_rounded),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        'In jail — pay '
+                        '${formatMoney(board.jailFine, board.currencySymbol)} '
+                        'to leave, or roll for doubles.',
+                        style: textTheme.bodyMedium,
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    FilledButton(
+                      onPressed:
+                          session.canPayJailFine ? _payJailFine : null,
+                      child: const Text('Pay'),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 10),
+            ],
             Row(
               children: [
                 Expanded(
@@ -715,11 +764,15 @@ class _GameScreenState extends State<GameScreen> {
                 label: 'Receive',
                 onTap: connected ? _openReceive : null,
               ),
-              QuickActionButton(
-                icon: Icons.flag_rounded,
-                label: 'Pass GO',
-                onTap: canResolve ? _passGo : null,
-              ),
+              // Once a board has a curated layout, landing on/passing GO
+              // pays out automatically — this manual trigger would only
+              // ever double-pay, so it's only offered without one.
+              if (board.goIndex < 0)
+                QuickActionButton(
+                  icon: Icons.flag_rounded,
+                  label: 'Pass GO',
+                  onTap: canResolve ? _passGo : null,
+                ),
               QuickActionButton(
                 icon: Icons.south_west_rounded,
                 label: 'Collect',

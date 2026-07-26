@@ -164,6 +164,25 @@ class GameClient {
   void sendDrawCard(String deck) =>
       send(WsMessage(MessageType.drawCard, {'deck': deck}));
 
+  /// Edits an existing transaction's note (the amount and parties never
+  /// change). [transactionId] is the ledger entry being edited.
+  String sendEditTransactionNote(String transactionId, String note) {
+    final txId = const Uuid().v4();
+    send(WsMessage(MessageType.editTransactionNote, {
+      'id': txId,
+      'transactionId': transactionId,
+      'note': note,
+    }));
+    return txId;
+  }
+
+  /// Pays the jail fine to leave immediately, before rolling.
+  String sendPayJailFine() {
+    final txId = const Uuid().v4();
+    send(WsMessage(MessageType.payJailFine, {'id': txId}));
+    return txId;
+  }
+
   void sendEndTurn() => send(const WsMessage(MessageType.endTurn));
 
   void sendLeave() => send(const WsMessage(MessageType.leaveGame));

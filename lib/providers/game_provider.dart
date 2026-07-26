@@ -54,6 +54,7 @@ class GameProvider extends ChangeNotifier {
   String? _currentTurnId;
   DiceRoll? _lastRoll;
   bool _turnRolled = false;
+  int _freeParkingPot = 0;
   MoneyRequest? _incomingRequest;
   ClientStatus _connection = ClientStatus.disconnected;
   bool _hostEnded = false;
@@ -178,6 +179,17 @@ class GameProvider extends ChangeNotifier {
   bool get canResolve =>
       _connection == ClientStatus.connected && isMyTurn;
 
+  /// Accumulated Free Parking pot (0 on boards without a curated layout).
+  int get freeParkingPot => _freeParkingPot;
+
+  /// Whether I can pay my way out of jail right now — my turn, in jail,
+  /// before rolling.
+  bool get canPayJailFine =>
+      _connection == ClientStatus.connected &&
+      isMyTurn &&
+      !_turnRolled &&
+      me?.inJail == true;
+
   /// A money request another player sent me, waiting for my answer.
   MoneyRequest? get incomingRequest => _incomingRequest;
 
@@ -267,6 +279,7 @@ class GameProvider extends ChangeNotifier {
         currentTurnId: turnState.currentTurnId,
         lastRoll: turnState.lastRoll,
         turnRolled: turnState.turnRolled,
+        freeParkingPot: turnState.freeParkingPot,
       );
     }
 
@@ -297,6 +310,7 @@ class GameProvider extends ChangeNotifier {
     String? currentTurnId,
     DiceRoll? lastRoll,
     bool turnRolled = false,
+    int freeParkingPot = 0,
   }) async {
     if (kIsWeb) {
       return err(
@@ -313,6 +327,7 @@ class GameProvider extends ChangeNotifier {
       currentTurnId: currentTurnId,
       lastRoll: lastRoll,
       turnRolled: turnRolled,
+      freeParkingPot: freeParkingPot,
     );
     if (!started.isOk) return err(started.error!);
     _server = server;
@@ -443,6 +458,16 @@ class GameProvider extends ChangeNotifier {
         amount: (game?.board.salary ?? 0) * (landedOnGo ? 2 : 1),
         note: landedOnGo ? 'Landed on GO' : 'Passed GO',
       );
+
+  /// Edits a past transaction's note. Only the note changes — amount and
+  /// parties are fixed once a transaction is booked.
+  Future<Result<void>> editTransactionNote(String transactionId, String note) {
+    final offline = _requireConnection();
+    if (offline != null) return Future.value(offline);
+    return _awaitVerdict(
+      _client!.sendEditTransactionNote(transactionId, note),
+    );
+  }
 
   /// Draws from the board's Chance ('chance') or Community Chest ('chest')
   /// deck. The server picks the card, shows it to everyone and applies its
@@ -616,6 +641,17 @@ class GameProvider extends ChangeNotifier {
     if (canEndTurn) _client?.sendEndTurn();
   }
 
+  /// Pays my way out of jail immediately, before rolling. Rolling doubles
+  /// instead (via [rollDice]) escapes for free.
+  Future<Result<void>> payJailFine() {
+    if (!canPayJailFine) {
+      return Future.value(err("You're not stuck in jail right now."));
+    }
+    final offline = _requireConnection();
+    if (offline != null) return Future.value(offline);
+    return _awaitVerdict(_client!.sendPayJailFine());
+  }
+
   // ------------------------------------------------------- Incoming events
 
   void _onMessage(WsMessage message) {
@@ -650,6 +686,22 @@ class GameProvider extends ChangeNotifier {
             _db.upsertOwnerships(record.game.id, [ownership]);
           }
           notifyListeners();
+        }
+      case MessageType.transactionNoteUpdated:
+        final txId = message.payload['txId'] as String?;
+        _pendingPayments.remove(txId)?.complete(ok(null));
+        final json = message.payload['transaction'] as Map<String, dynamic>?;
+        if (json != null) {
+          final updated = GameTransaction.fromJson(json);
+          final index = _transactions.indexWhere((t) => t.id == updated.id);
+          if (index != -1) {
+            _transactions[index] = updated;
+            final record = _record;
+            if (record != null && !isHost) {
+              _db.insertTransactions(record.game.id, [updated]);
+            }
+            notifyListeners();
+          }
         }
       case MessageType.moneyRequested:
         final json = message.payload['request'] as Map<String, dynamic>?;
@@ -689,6 +741,25 @@ class GameProvider extends ChangeNotifier {
         if (json != null) {
           _lastRoll = DiceRoll.fromJson(json);
           _turnRolled = message.payload['turnRolled'] as bool? ?? true;
+          _freeParkingPot =
+              message.payload['freeParkingPot'] as int? ?? _freeParkingPot;
+          final playersJson = message.payload['players'] as List<dynamic>?;
+          if (playersJson != null) {
+            _players = playersJson
+                .map((e) => Player.fromJson(e as Map<String, dynamic>))
+                .toList();
+          }
+          final record = _record;
+          if (record != null && !isHost) {
+            _db.upsertPlayers(record.game.id, _players);
+            _db.setTurnState(
+              record.game.id,
+              currentTurnId: _currentTurnId,
+              lastRoll: _lastRoll,
+              turnRolled: _turnRolled,
+              freeParkingPot: _freeParkingPot,
+            );
+          }
           final pending = _pendingRoll;
           _pendingRoll = null;
           if (pending != null && !pending.isCompleted) {
@@ -706,6 +777,7 @@ class GameProvider extends ChangeNotifier {
             currentTurnId: _currentTurnId,
             lastRoll: _lastRoll,
             turnRolled: false,
+            freeParkingPot: _freeParkingPot,
           );
         }
         notifyListeners();
@@ -763,6 +835,7 @@ class GameProvider extends ChangeNotifier {
     _currentTurnId = snapshot.currentTurnId;
     _lastRoll = snapshot.lastRoll;
     _turnRolled = snapshot.turnRolled;
+    _freeParkingPot = snapshot.freeParkingPot;
 
     if (isHost) {
       // The server already persisted players and transactions.
@@ -789,6 +862,8 @@ class GameProvider extends ChangeNotifier {
           .map((e) => Player.fromJson(e as Map<String, dynamic>))
           .toList();
     }
+    _freeParkingPot =
+        payload['freeParkingPot'] as int? ?? _freeParkingPot;
     if (!_transactions.any((t) => t.id == tx.id)) {
       _transactions.add(tx);
     }
@@ -798,6 +873,13 @@ class GameProvider extends ChangeNotifier {
     if (!isHost) {
       _db.upsertPlayers(record.game.id, _players);
       _db.insertTransactions(record.game.id, [tx]);
+      _db.setTurnState(
+        record.game.id,
+        currentTurnId: _currentTurnId,
+        lastRoll: _lastRoll,
+        turnRolled: _turnRolled,
+        freeParkingPot: _freeParkingPot,
+      );
     }
 
     _pendingPayments.remove(tx.id)?.complete(ok(null));

@@ -7,7 +7,9 @@ import '../services/game_client.dart';
 import '../theme/app_theme.dart';
 import '../utils/formatting.dart';
 import '../widgets/activity_feed.dart';
+import '../widgets/board_layout_view.dart';
 import '../widgets/player_avatar.dart';
+import 'properties_screen.dart';
 
 /// Table-wide view for any big screen: every balance, who owns what, whose
 /// turn it is, and the live activity ticker. Works in any orientation.
@@ -96,6 +98,27 @@ class DashboardScreen extends StatelessWidget {
                 ),
             ],
           ),
+          if (game.board.goIndex >= 0) ...[
+            const SizedBox(height: 20),
+            Text(
+              'Board',
+              style:
+                  textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
+            ),
+            const SizedBox(height: 12),
+            BoardLayoutView(
+              board: game.board,
+              players: session.players,
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              onTapProperty: (property) => Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) =>
+                      PropertiesScreen(openPropertyId: property.id),
+                ),
+              ),
+            ),
+          ],
         ],
       ),
     );

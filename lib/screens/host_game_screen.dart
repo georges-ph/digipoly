@@ -1,8 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:uuid/uuid.dart';
 
-import '../models/board.dart';
 import '../models/result.dart';
 import '../providers/boards_provider.dart';
 import '../providers/game_provider.dart';
@@ -23,7 +21,6 @@ class HostGameScreen extends StatefulWidget {
 class _HostGameScreenState extends State<HostGameScreen> {
   final _nameController = TextEditingController();
 
-  /// null means the built-in Classic template.
   String? _selectedBoardId;
   bool _starting = false;
 
@@ -39,18 +36,15 @@ class _HostGameScreenState extends State<HostGameScreen> {
     final identity = context.read<IdentityService>();
     final boards = context.read<BoardsProvider>();
 
+    final boardId = _selectedBoardId ??
+        (boards.boards.isNotEmpty ? boards.boards.first.id : null);
+    if (boardId == null) return;
+    final saved = boards.boards.where((b) => b.id == boardId).toList();
+    if (saved.isEmpty) return;
+    final board = saved.first;
+
     var gameName = _nameController.text.trim();
     if (gameName.isEmpty) gameName = "${identity.displayName}'s game";
-
-    final Board board;
-    if (_selectedBoardId == null) {
-      board = Board.classic(const Uuid().v4());
-    } else {
-      final saved =
-          boards.boards.where((b) => b.id == _selectedBoardId).toList();
-      if (saved.isEmpty) return;
-      board = saved.first;
-    }
 
     setState(() => _starting = true);
     final result = await session.hostGame(board: board, gameName: gameName);
@@ -71,6 +65,8 @@ class _HostGameScreenState extends State<HostGameScreen> {
     final boards = context.watch<BoardsProvider>();
     final textTheme = Theme.of(context).textTheme;
     final scheme = Theme.of(context).colorScheme;
+    final selectedId = _selectedBoardId ??
+        (boards.boards.isNotEmpty ? boards.boards.first.id : null);
 
     return Scaffold(
       appBar: AppBar(title: const Text('Host a game')),
@@ -94,23 +90,16 @@ class _HostGameScreenState extends State<HostGameScreen> {
           ),
           const SizedBox(height: 4),
           Text(
-            'The board is embedded into the game — players who join get it '
-            'automatically.',
+            boards.boards.isEmpty
+                ? 'You need a board before you can host. Add one from the '
+                    'Boards tab first.'
+                : 'The board is embedded into the game — players who join '
+                    'get it automatically.',
             style:
                 textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
           ),
           const SizedBox(height: 12),
-          _BoardChoice(
-            title: 'Classic',
-            subtitle: '28 properties · \$ · built-in',
-            symbol: r'$',
-            color: AppColors.accent,
-            selected: _selectedBoardId == null,
-            badge: 'Built-in',
-            onTap: () => setState(() => _selectedBoardId = null),
-          ),
           for (final board in boards.boards) ...[
-            const SizedBox(height: 10),
             _BoardChoice(
               title: board.name,
               subtitle: '${board.properties.length} properties · '
@@ -118,9 +107,10 @@ class _HostGameScreenState extends State<HostGameScreen> {
                   '${formatMoney(board.startingBalance, board.currencySymbol)}',
               symbol: board.currencySymbol,
               color: AppColors.avatarColor(board.id),
-              selected: _selectedBoardId == board.id,
+              selected: selectedId == board.id,
               onTap: () => setState(() => _selectedBoardId = board.id),
             ),
+            const SizedBox(height: 10),
           ],
         ],
       ),
@@ -128,7 +118,7 @@ class _HostGameScreenState extends State<HostGameScreen> {
         child: Padding(
           padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
           child: FilledButton.icon(
-            onPressed: _starting ? null : _start,
+            onPressed: (_starting || selectedId == null) ? null : _start,
             icon: _starting
                 ? const SizedBox(
                     width: 18,
@@ -155,7 +145,6 @@ class _BoardChoice extends StatelessWidget {
     required this.color,
     required this.selected,
     required this.onTap,
-    this.badge,
   });
 
   final String title;
@@ -164,7 +153,6 @@ class _BoardChoice extends StatelessWidget {
   final Color color;
   final bool selected;
   final VoidCallback onTap;
-  final String? badge;
 
   @override
   Widget build(BuildContext context) {
@@ -210,39 +198,12 @@ class _BoardChoice extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(
-                      children: [
-                        Flexible(
-                          child: Text(
-                            title,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: textTheme.titleSmall?.copyWith(
-                              fontWeight: FontWeight.w800,
-                            ),
-                          ),
-                        ),
-                        if (badge != null) ...[
-                          const SizedBox(width: 8),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 2,
-                            ),
-                            decoration: BoxDecoration(
-                              color: AppColors.accent.withValues(alpha: 0.14),
-                              borderRadius: BorderRadius.circular(20),
-                            ),
-                            child: Text(
-                              badge!,
-                              style: textTheme.labelSmall?.copyWith(
-                                color: AppColors.accent,
-                                fontWeight: FontWeight.w800,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ],
+                    Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: textTheme.titleSmall
+                          ?.copyWith(fontWeight: FontWeight.w800),
                     ),
                     const SizedBox(height: 3),
                     Text(

@@ -9,6 +9,9 @@ class Player {
     this.isHost = false,
     this.isOnline = false,
     this.hasLeft = false,
+    this.position = 0,
+    this.inJail = false,
+    this.jailTurns = 0,
   });
 
   /// Sentinel id for the bank. The bank has infinite money and is a valid
@@ -32,6 +35,16 @@ class Player {
   /// disconnecting). Left players stay in history but can't transact.
   final bool hasLeft;
 
+  /// Index into the board's `properties` list (its square order). Only
+  /// meaningful for boards with a curated layout (`board.goIndex != -1`).
+  final int position;
+
+  /// Whether the player is currently locked in jail.
+  final bool inJail;
+
+  /// Failed jail-escape attempts so far this stay (0..3).
+  final int jailTurns;
+
   Map<String, dynamic> toJson() => {
         'id': id,
         'name': name,
@@ -40,6 +53,9 @@ class Player {
         'isHost': isHost,
         'isOnline': isOnline,
         'hasLeft': hasLeft,
+        'position': position,
+        'inJail': inJail,
+        'jailTurns': jailTurns,
       };
 
   factory Player.fromJson(Map<String, dynamic> json) => Player(
@@ -50,6 +66,9 @@ class Player {
         isHost: json['isHost'] as bool? ?? false,
         isOnline: json['isOnline'] as bool? ?? false,
         hasLeft: json['hasLeft'] as bool? ?? false,
+        position: json['position'] as int? ?? 0,
+        inJail: json['inJail'] as bool? ?? false,
+        jailTurns: json['jailTurns'] as int? ?? 0,
       );
 
   Player copyWith({
@@ -59,6 +78,9 @@ class Player {
     bool? isHost,
     bool? isOnline,
     bool? hasLeft,
+    int? position,
+    bool? inJail,
+    int? jailTurns,
   }) =>
       Player(
         id: id,
@@ -68,5 +90,8 @@ class Player {
         isHost: isHost ?? this.isHost,
         isOnline: isOnline ?? this.isOnline,
         hasLeft: hasLeft ?? this.hasLeft,
+        position: position ?? this.position,
+        inJail: inJail ?? this.inJail,
+        jailTurns: jailTurns ?? this.jailTurns,
       );
 }

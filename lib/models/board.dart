@@ -33,6 +33,7 @@ class Board {
     required this.currencySymbol,
     required this.startingBalance,
     required this.salary,
+    this.jailFine = 50,
     this.properties = const [],
     this.chanceCards = const [],
     this.communityChestCards = const [],
@@ -48,9 +49,24 @@ class Board {
   /// Amount collected from the bank when passing GO.
   final int salary;
 
+  /// Cost to pay your way out of jail on your turn.
+  final int jailFine;
+
+  /// Every square on the board, in physical board order — ownable
+  /// properties and special squares (GO, Jail, Tax, ...) alike. A board
+  /// with no [PropertyKind.go] entry has no curated layout: token position
+  /// tracking and its auto-effects stay off, and the game behaves exactly
+  /// as a board without this feature always has.
   final List<Property> properties;
   final List<BoardCard> chanceCards;
   final List<BoardCard> communityChestCards;
+
+  /// Index of the (first) GO square in [properties], or -1 if none.
+  int get goIndex => properties.indexWhere((p) => p.kind == PropertyKind.go);
+
+  /// Index of the (first) Jail square in [properties], or -1 if none.
+  int get jailIndex =>
+      properties.indexWhere((p) => p.kind == PropertyKind.jail);
 
   Map<String, dynamic> toJson() => {
         'id': id,
@@ -58,6 +74,7 @@ class Board {
         'currencySymbol': currencySymbol,
         'startingBalance': startingBalance,
         'salary': salary,
+        'jailFine': jailFine,
         'properties': properties.map((p) => p.toJson()).toList(),
         'chanceCards': chanceCards.map((c) => c.toJson()).toList(),
         'communityChestCards':
@@ -70,6 +87,7 @@ class Board {
         currencySymbol: json['currencySymbol'] as String? ?? r'$',
         startingBalance: json['startingBalance'] as int? ?? 1500,
         salary: json['salary'] as int? ?? 200,
+        jailFine: json['jailFine'] as int? ?? 50,
         properties: (json['properties'] as List<dynamic>? ?? const [])
             .map((e) => Property.fromJson(e as Map<String, dynamic>))
             .toList(),
@@ -87,6 +105,7 @@ class Board {
     String? currencySymbol,
     int? startingBalance,
     int? salary,
+    int? jailFine,
     List<Property>? properties,
     List<BoardCard>? chanceCards,
     List<BoardCard>? communityChestCards,
@@ -97,79 +116,9 @@ class Board {
         currencySymbol: currencySymbol ?? this.currencySymbol,
         startingBalance: startingBalance ?? this.startingBalance,
         salary: salary ?? this.salary,
+        jailFine: jailFine ?? this.jailFine,
         properties: properties ?? this.properties,
         chanceCards: chanceCards ?? this.chanceCards,
         communityChestCards: communityChestCards ?? this.communityChestCards,
       );
-
-  /// The classic US edition as a ready-to-play template.
-  factory Board.classic(String id) {
-    Property street(
-      String id,
-      String name,
-      int color,
-      int price,
-      List<int> rents,
-      int housePrice,
-    ) =>
-        Property(
-          id: id,
-          name: name,
-          kind: PropertyKind.street,
-          colorValue: color,
-          price: price,
-          rentTiers: rents,
-          housePrice: housePrice,
-          mortgageValue: price ~/ 2,
-        );
-
-    const brown = 0xFF8B4513;
-    const lightBlue = 0xFF87CEEB;
-    const pink = 0xFFD81E75;
-    const orange = 0xFFF57C00;
-    const red = 0xFFD32F2F;
-    const yellow = 0xFFFBC02D;
-    const green = 0xFF2E7D32;
-    const darkBlue = 0xFF1A47B8;
-    const railroad = 0xFF37474F;
-    const utility = 0xFF78909C;
-
-    return Board(
-      id: id,
-      name: 'Classic',
-      currencySymbol: r'$',
-      startingBalance: 1500,
-      salary: 200,
-      properties: [
-        street('med', 'Mediterranean Avenue', brown, 60, [2, 10, 30, 90, 160, 250], 50),
-        street('bal', 'Baltic Avenue', brown, 60, [4, 20, 60, 180, 320, 450], 50),
-        street('ori', 'Oriental Avenue', lightBlue, 100, [6, 30, 90, 270, 400, 550], 50),
-        street('ver', 'Vermont Avenue', lightBlue, 100, [6, 30, 90, 270, 400, 550], 50),
-        street('con', 'Connecticut Avenue', lightBlue, 120, [8, 40, 100, 300, 450, 600], 50),
-        street('stc', 'St. Charles Place', pink, 140, [10, 50, 150, 450, 625, 750], 100),
-        street('sta', 'States Avenue', pink, 140, [10, 50, 150, 450, 625, 750], 100),
-        street('vir', 'Virginia Avenue', pink, 160, [12, 60, 180, 500, 700, 900], 100),
-        street('stj', 'St. James Place', orange, 180, [14, 70, 200, 550, 750, 950], 100),
-        street('ten', 'Tennessee Avenue', orange, 180, [14, 70, 200, 550, 750, 950], 100),
-        street('nyk', 'New York Avenue', orange, 200, [16, 80, 220, 600, 800, 1000], 100),
-        street('ken', 'Kentucky Avenue', red, 220, [18, 90, 250, 700, 875, 1050], 150),
-        street('ind', 'Indiana Avenue', red, 220, [18, 90, 250, 700, 875, 1050], 150),
-        street('ill', 'Illinois Avenue', red, 240, [20, 100, 300, 750, 925, 1100], 150),
-        street('atl', 'Atlantic Avenue', yellow, 260, [22, 110, 330, 800, 975, 1150], 150),
-        street('ven', 'Ventnor Avenue', yellow, 260, [22, 110, 330, 800, 975, 1150], 150),
-        street('mar', 'Marvin Gardens', yellow, 280, [24, 120, 360, 850, 1025, 1200], 150),
-        street('pac', 'Pacific Avenue', green, 300, [26, 130, 390, 900, 1100, 1275], 200),
-        street('ncr', 'North Carolina Avenue', green, 300, [26, 130, 390, 900, 1100, 1275], 200),
-        street('pen', 'Pennsylvania Avenue', green, 320, [28, 150, 450, 1000, 1200, 1400], 200),
-        street('prk', 'Park Place', darkBlue, 350, [35, 175, 500, 1100, 1300, 1500], 200),
-        street('bdw', 'Boardwalk', darkBlue, 400, [50, 200, 600, 1400, 1700, 2000], 200),
-        const Property(id: 'rr1', name: 'Reading Railroad', kind: PropertyKind.railroad, colorValue: railroad, price: 200, rentTiers: [25, 50, 100, 200], mortgageValue: 100),
-        const Property(id: 'rr2', name: 'Pennsylvania Railroad', kind: PropertyKind.railroad, colorValue: railroad, price: 200, rentTiers: [25, 50, 100, 200], mortgageValue: 100),
-        const Property(id: 'rr3', name: 'B. & O. Railroad', kind: PropertyKind.railroad, colorValue: railroad, price: 200, rentTiers: [25, 50, 100, 200], mortgageValue: 100),
-        const Property(id: 'rr4', name: 'Short Line', kind: PropertyKind.railroad, colorValue: railroad, price: 200, rentTiers: [25, 50, 100, 200], mortgageValue: 100),
-        const Property(id: 'ele', name: 'Electric Company', kind: PropertyKind.utility, colorValue: utility, price: 150, rentTiers: [4, 10], mortgageValue: 75),
-        const Property(id: 'wat', name: 'Water Works', kind: PropertyKind.utility, colorValue: utility, price: 150, rentTiers: [4, 10], mortgageValue: 75),
-      ],
-    );
-  }
 }

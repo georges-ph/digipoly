@@ -48,7 +48,7 @@ class DatabaseService {
 
     _db = await openDatabase(
       path,
-      version: 3,
+      version: 4,
       onCreate: (db, version) async {
         await db.execute(
           'CREATE TABLE boards('
@@ -59,7 +59,8 @@ class DatabaseService {
           'id TEXT PRIMARY KEY, json TEXT NOT NULL, role TEXT NOT NULL, '
           'my_player_id TEXT NOT NULL, host_address TEXT, host_port INTEGER, '
           'last_played_at INTEGER NOT NULL, current_turn_id TEXT, '
-          'last_roll TEXT, turn_rolled INTEGER NOT NULL DEFAULT 0)',
+          'last_roll TEXT, turn_rolled INTEGER NOT NULL DEFAULT 0, '
+          'free_parking_pot INTEGER NOT NULL DEFAULT 0)',
         );
         await db.execute(
           'CREATE TABLE players('
@@ -87,6 +88,12 @@ class DatabaseService {
           await db.execute(
             'ALTER TABLE games ADD COLUMN '
             'turn_rolled INTEGER NOT NULL DEFAULT 0',
+          );
+        }
+        if (oldVersion < 4) {
+          await db.execute(
+            'ALTER TABLE games ADD COLUMN '
+            'free_parking_pot INTEGER NOT NULL DEFAULT 0',
           );
         }
       },
@@ -277,6 +284,7 @@ class DatabaseService {
     String? currentTurnId,
     DiceRoll? lastRoll,
     bool turnRolled = false,
+    int freeParkingPot = 0,
   }) =>
       _db.update(
         'games',
@@ -285,21 +293,36 @@ class DatabaseService {
           'last_roll':
               lastRoll == null ? null : jsonEncode(lastRoll.toJson()),
           'turn_rolled': turnRolled ? 1 : 0,
+          'free_parking_pot': freeParkingPot,
         },
         where: 'id = ?',
         whereArgs: [gameId],
       );
 
-  Future<({String? currentTurnId, DiceRoll? lastRoll, bool turnRolled})>
-      getTurnState(String gameId) async {
+  Future<({
+    String? currentTurnId,
+    DiceRoll? lastRoll,
+    bool turnRolled,
+    int freeParkingPot,
+  })> getTurnState(String gameId) async {
     final rows = await _db.query(
       'games',
-      columns: ['current_turn_id', 'last_roll', 'turn_rolled'],
+      columns: [
+        'current_turn_id',
+        'last_roll',
+        'turn_rolled',
+        'free_parking_pot',
+      ],
       where: 'id = ?',
       whereArgs: [gameId],
     );
     if (rows.isEmpty) {
-      return (currentTurnId: null, lastRoll: null, turnRolled: false);
+      return (
+        currentTurnId: null,
+        lastRoll: null,
+        turnRolled: false,
+        freeParkingPot: 0,
+      );
     }
     final row = rows.first;
     final rollJson = row['last_roll'] as String?;
@@ -309,6 +332,7 @@ class DatabaseService {
           ? null
           : DiceRoll.fromJson(jsonDecode(rollJson) as Map<String, dynamic>),
       turnRolled: (row['turn_rolled'] as int? ?? 0) != 0,
+      freeParkingPot: row['free_parking_pot'] as int? ?? 0,
     );
   }
 
@@ -339,6 +363,7 @@ class DatabaseService {
       currentTurnId: snapshot.currentTurnId,
       lastRoll: snapshot.lastRoll,
       turnRolled: snapshot.turnRolled,
+      freeParkingPot: snapshot.freeParkingPot,
     );
   }
 }

@@ -41,12 +41,6 @@ class BoardsTab extends StatelessWidget {
               onTap: () => Navigator.pop(sheetContext, 'blank'),
             ),
             ListTile(
-              leading: const Icon(Icons.auto_awesome_outlined),
-              title: const Text('Classic template'),
-              subtitle: const Text('The standard board, ready to edit'),
-              onTap: () => Navigator.pop(sheetContext, 'classic'),
-            ),
-            ListTile(
               leading: const Icon(Icons.content_paste_rounded),
               title: const Text('Paste from clipboard'),
               subtitle: const Text('Import a board someone shared as text'),
@@ -68,9 +62,7 @@ class BoardsTab extends StatelessWidget {
     if (choice == null || !context.mounted) return;
 
     Board? board;
-    if (choice == 'classic') {
-      board = Board.classic(const Uuid().v4());
-    } else if (choice == 'paste') {
+    if (choice == 'paste') {
       board = await _boardFromClipboard(context);
       if (board == null) return;
     } else if (choice == 'file') {

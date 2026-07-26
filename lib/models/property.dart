@@ -1,7 +1,36 @@
 enum PropertyKind {
   street,
   railroad,
-  utility;
+  utility,
+
+  /// Passing/landing here pays the board's salary (doubled if landed on
+  /// exactly). Not ownable.
+  go,
+
+  /// Not ownable. A player only stops moving here when sent by a
+  /// [goToJail] square or failing to escape; otherwise it's just visited.
+  jail,
+
+  /// Not ownable. Pays out the accumulated pot, if any (house rule).
+  freeParking,
+
+  /// Not ownable. Sends the landing player straight to the board's jail
+  /// square.
+  goToJail,
+
+  /// Not ownable. [Property.price] is reused as the fixed tax amount,
+  /// auto-charged to the bank and added to the Free Parking pot.
+  tax,
+
+  /// Not ownable. Draws from the board's Chance deck.
+  chance,
+
+  /// Not ownable. Draws from the board's Community Chest deck.
+  communityChest;
+
+  /// Whether a square of this kind can be bought/owned/mortgaged/built on.
+  bool get isOwnable =>
+      this == street || this == railroad || this == utility;
 
   static PropertyKind fromName(String name) => PropertyKind.values.firstWhere(
         (kind) => kind.name == name,

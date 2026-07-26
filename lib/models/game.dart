@@ -98,6 +98,7 @@ class GameSnapshot {
     this.currentTurnId,
     this.lastRoll,
     this.turnRolled = false,
+    this.freeParkingPot = 0,
   });
 
   final Game game;
@@ -112,6 +113,9 @@ class GameSnapshot {
   /// Whether the current player has already rolled this turn.
   final bool turnRolled;
 
+  /// Accumulated Free Parking pot (fed by tax/jail-fine payments).
+  final int freeParkingPot;
+
   Map<String, dynamic> toJson() => {
         'game': game.toJson(),
         'players': players.map((p) => p.toJson()).toList(),
@@ -120,6 +124,7 @@ class GameSnapshot {
         if (currentTurnId != null) 'currentTurnId': currentTurnId,
         if (lastRoll != null) 'lastRoll': lastRoll!.toJson(),
         'turnRolled': turnRolled,
+        'freeParkingPot': freeParkingPot,
       };
 
   factory GameSnapshot.fromJson(Map<String, dynamic> json) => GameSnapshot(
@@ -138,5 +143,6 @@ class GameSnapshot {
             ? null
             : DiceRoll.fromJson(json['lastRoll'] as Map<String, dynamic>),
         turnRolled: json['turnRolled'] as bool? ?? false,
+        freeParkingPot: json['freeParkingPot'] as int? ?? 0,
       );
 }

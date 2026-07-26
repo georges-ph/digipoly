@@ -23,8 +23,8 @@ inside every game you host — players who join never need to recreate it.
   (full-group double rent, railroad counts, utility dice multipliers)
 - **Turns**: optional turn rotation with an End Turn button
 - **Dashboard**: a table-wide live view for any big screen
-- **Boards**: editor, built-in Classic template, duplicate, and offline
-  sharing — copy a board as text, or save the board from any game you joined
+- **Boards**: editor, duplicate, and offline sharing — copy a board as
+  text, or save the board from any game you joined
 - **NFC property cards** (Android): write a property to a physical card,
   tap it in-game to buy or pay rent
 - **Resilient sessions**: your seat and balance survive app restarts and

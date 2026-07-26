@@ -5,6 +5,19 @@ import '../models/property.dart';
 import '../models/property_ownership.dart';
 import '../models/result.dart';
 
+/// Outcome of one dice roll attempted while in jail.
+enum JailRollOutcome {
+  /// Doubles: free, and the roll also moves the player.
+  escaped,
+
+  /// Not doubles, and attempts remain — stays in jail, no movement.
+  stillStuck,
+
+  /// Not doubles on the 3rd attempt — the fine is forced, and the roll
+  /// still moves the player (same as escaping, just paid for).
+  mustPayNow,
+}
+
 /// The money rules, and nothing else. Pure functions over game state — no
 /// sockets, no database — so the server can validate intents in one place
 /// and the logic stays trivially testable.
@@ -78,6 +91,9 @@ abstract final class GameEngine {
   }) {
     final property = _find(board, propertyId);
     if (property == null) return err('Unknown property.');
+    if (!property.kind.isOwnable) {
+      return err("This square can't be owned.");
+    }
     if (ownerships.containsKey(propertyId)) {
       return err('${property.name} is already owned.');
     }
@@ -135,6 +151,16 @@ abstract final class GameEngine {
         final count = ownedOfKind(PropertyKind.utility);
         final multiplier = tiers[(count - 1).clamp(0, tiers.length - 1)];
         return ok(multiplier * diceTotal);
+      case PropertyKind.go:
+      case PropertyKind.jail:
+      case PropertyKind.freeParking:
+      case PropertyKind.goToJail:
+      case PropertyKind.tax:
+      case PropertyKind.chance:
+      case PropertyKind.communityChest:
+        // Unreachable: these kinds are never ownable, so no ownership row
+        // (and thus no rent) can exist for one — see [validatePurchase].
+        return err("This square can't be owned.");
     }
   }
 
@@ -269,6 +295,44 @@ abstract final class GameEngine {
       return err('Sell the buildings on ${property.name} first.');
     }
     return ok(target);
+  }
+
+  /// Moves a token [total] squares forward around a board of [squareCount]
+  /// squares. [goIndex] is `board.goIndex` (-1 if the board has no curated
+  /// layout, in which case nothing ever "crosses GO"). `crossedGo` is true
+  /// whenever the move passes through or lands on GO — pay salary once for
+  /// that, doubled when [landedOnGo] is also true (landed on it exactly).
+  static ({int position, bool crossedGo, bool landedOnGo}) advancePosition({
+    required int squareCount,
+    required int currentPosition,
+    required int total,
+    required int goIndex,
+  }) {
+    final position = (currentPosition + total) % squareCount;
+    if (goIndex < 0) {
+      return (position: position, crossedGo: false, landedOnGo: false);
+    }
+    // Steps forward needed to first reach goIndex, not counting a start
+    // already sitting on it (so passing/landing pays out once, not on
+    // every roll for a player who happens to start their turn there).
+    final stepsToGo = (goIndex - currentPosition - 1) % squareCount + 1;
+    return (
+      position: position,
+      crossedGo: total >= stepsToGo,
+      landedOnGo: position == goIndex,
+    );
+  }
+
+  /// Resolves one roll attempted while in jail: doubles always escape (and
+  /// move by the roll); otherwise the 3rd failed attempt (`jailTurns == 2`
+  /// going in) forces paying the fine so the roll still moves the player.
+  static JailRollOutcome resolveJailRoll({
+    required int jailTurns,
+    required bool isDouble,
+  }) {
+    if (isDouble) return JailRollOutcome.escaped;
+    if (jailTurns >= 2) return JailRollOutcome.mustPayNow;
+    return JailRollOutcome.stillStuck;
   }
 
   /// The next player in seat order who is still in the game.

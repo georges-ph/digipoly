@@ -555,5 +555,129 @@ void main() {
         isFalse,
       );
     });
+
+    test('non-ownable squares can never be bought', () {
+      const go = Property(
+        id: 'go',
+        name: 'GO',
+        kind: PropertyKind.go,
+        colorValue: 0,
+        price: 0,
+        rentTiers: [],
+      );
+      final b = board([go]);
+      expect(
+        GameEngine.validatePurchase(
+          board: b,
+          ownerships: const {},
+          propertyId: 'go',
+          buyer: player('a', 1000),
+        ).isOk,
+        isFalse,
+      );
+    });
+  });
+
+  group('advancePosition', () {
+    test('plain move with no wrap', () {
+      final result = GameEngine.advancePosition(
+        squareCount: 8,
+        currentPosition: 1,
+        total: 3,
+        goIndex: 0,
+      );
+      expect(result.position, 4);
+      expect(result.crossedGo, isFalse);
+      expect(result.landedOnGo, isFalse);
+    });
+
+    test('landing exactly on GO', () {
+      final result = GameEngine.advancePosition(
+        squareCount: 8,
+        currentPosition: 6,
+        total: 2,
+        goIndex: 0,
+      );
+      expect(result.position, 0);
+      expect(result.crossedGo, isTrue);
+      expect(result.landedOnGo, isTrue);
+    });
+
+    test('passing GO without landing on it', () {
+      final result = GameEngine.advancePosition(
+        squareCount: 8,
+        currentPosition: 6,
+        total: 3,
+        goIndex: 0,
+      );
+      expect(result.position, 1);
+      expect(result.crossedGo, isTrue);
+      expect(result.landedOnGo, isFalse);
+    });
+
+    test('starting on GO does not re-trigger salary for the same turn', () {
+      final result = GameEngine.advancePosition(
+        squareCount: 8,
+        currentPosition: 0,
+        total: 5,
+        goIndex: 0,
+      );
+      expect(result.position, 5);
+      expect(result.crossedGo, isFalse);
+    });
+
+    test('GO can sit anywhere in the layout, not just index 0', () {
+      final result = GameEngine.advancePosition(
+        squareCount: 8,
+        currentPosition: 3,
+        total: 4,
+        goIndex: 5,
+      );
+      expect(result.position, 7);
+      expect(result.crossedGo, isTrue);
+      expect(result.landedOnGo, isFalse);
+    });
+
+    test('no GO on the board means nothing ever crosses it', () {
+      final result = GameEngine.advancePosition(
+        squareCount: 8,
+        currentPosition: 6,
+        total: 4,
+        goIndex: -1,
+      );
+      expect(result.crossedGo, isFalse);
+      expect(result.landedOnGo, isFalse);
+    });
+  });
+
+  group('resolveJailRoll', () {
+    test('doubles always escape', () {
+      expect(
+        GameEngine.resolveJailRoll(jailTurns: 0, isDouble: true),
+        JailRollOutcome.escaped,
+      );
+      expect(
+        GameEngine.resolveJailRoll(jailTurns: 2, isDouble: true),
+        JailRollOutcome.escaped,
+      );
+    });
+
+    test('non-doubles stay stuck until the 3rd attempt', () {
+      expect(
+        GameEngine.resolveJailRoll(jailTurns: 0, isDouble: false),
+        JailRollOutcome.stillStuck,
+      );
+      expect(
+        GameEngine.resolveJailRoll(jailTurns: 1, isDouble: false),
+        JailRollOutcome.stillStuck,
+      );
+    });
+
+    test('the 3rd failed attempt forces paying the fine', () {
+      expect(
+        GameEngine.resolveJailRoll(jailTurns: 2, isDouble: false),
+        JailRollOutcome.mustPayNow,
+      );
+    });
   });
 }

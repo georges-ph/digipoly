@@ -3,8 +3,7 @@ import 'package:flutter/foundation.dart';
 import '../models/board.dart';
 import '../services/database_service.dart';
 
-/// The device's saved board templates. The built-in Classic template is not
-/// stored — it is always offered alongside these.
+/// The device's saved board templates.
 class BoardsProvider extends ChangeNotifier {
   BoardsProvider(this._db);
 

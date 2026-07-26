@@ -13,7 +13,14 @@ enum TransactionType {
 
   /// Mortgaging a property (bank pays owner) or lifting the mortgage
   /// (owner pays value + interest).
-  mortgage;
+  mortgage,
+
+  /// Landing on a Tax square, or paying the jail fine — both feed the
+  /// Free Parking pot.
+  tax,
+
+  /// Landing on Free Parking pays out the accumulated pot.
+  freeParking;
 
   static TransactionType fromName(String name) =>
       TransactionType.values.firstWhere(
@@ -56,6 +63,18 @@ class GameTransaction {
 
   final DateTime timestamp;
   final String note;
+
+  GameTransaction copyWith({String? note}) => GameTransaction(
+        id: id,
+        gameId: gameId,
+        fromId: fromId,
+        toId: toId,
+        amount: amount,
+        timestamp: timestamp,
+        type: type,
+        propertyId: propertyId,
+        note: note ?? this.note,
+      );
 
   Map<String, dynamic> toJson() => {
         'id': id,

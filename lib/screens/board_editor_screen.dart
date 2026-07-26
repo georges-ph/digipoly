@@ -139,128 +139,183 @@ class _BoardEditorScreenState extends State<BoardEditorScreen> {
           const SizedBox(width: 8),
         ],
       ),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(20, 8, 20, 40),
-        children: [
-          TextField(
-            controller: _nameController,
-            textCapitalization: TextCapitalization.words,
-            maxLength: 32,
-            decoration: const InputDecoration(
-              labelText: 'Board name',
-              hintText: 'e.g. Monopoly Beirut Edition',
-              counterText: '',
-            ),
-          ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              SizedBox(
-                width: 110,
-                child: TextField(
-                  controller: _currencyController,
-                  maxLength: 4,
-                  onChanged: (_) => setState(() {}),
+      // A CustomScrollView with the properties as a SliverReorderableList
+      // (rather than a shrink-wrapped, non-scrolling ReorderableListView)
+      // lets dragging near the top/bottom edge auto-scroll the real page —
+      // otherwise reordering across a long list needs drag/scroll/drag/scroll.
+      body: CustomScrollView(
+        slivers: [
+          SliverPadding(
+            padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
+            sliver: SliverList(
+              delegate: SliverChildListDelegate([
+                TextField(
+                  controller: _nameController,
+                  textCapitalization: TextCapitalization.words,
+                  maxLength: 32,
                   decoration: const InputDecoration(
-                    labelText: 'Currency',
-                    hintText: r'$',
+                    labelText: 'Board name',
+                    hintText: 'e.g. Monopoly Beirut Edition',
                     counterText: '',
                   ),
                 ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: TextField(
-                  controller: _startingController,
-                  keyboardType: TextInputType.number,
-                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                  decoration: const InputDecoration(
-                    labelText: 'Starting balance',
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    SizedBox(
+                      width: 110,
+                      child: TextField(
+                        controller: _currencyController,
+                        maxLength: 4,
+                        onChanged: (_) => setState(() {}),
+                        decoration: const InputDecoration(
+                          labelText: 'Currency',
+                          hintText: r'$',
+                          counterText: '',
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: TextField(
+                        controller: _startingController,
+                        keyboardType: TextInputType.number,
+                        inputFormatters: [
+                          FilteringTextInputFormatter.digitsOnly
+                        ],
+                        decoration: const InputDecoration(
+                          labelText: 'Starting balance',
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: TextField(
+                        controller: _salaryController,
+                        keyboardType: TextInputType.number,
+                        inputFormatters: [
+                          FilteringTextInputFormatter.digitsOnly
+                        ],
+                        decoration: const InputDecoration(
+                          labelText: 'GO salary',
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 20),
+                SectionHeader(
+                  title: 'Properties (${_properties.length})',
+                  trailing: TextButton.icon(
+                    onPressed: () => _editProperty(),
+                    icon: const Icon(Icons.add_rounded, size: 20),
+                    label: const Text('Add'),
+                  ),
+                ),
+                if (_properties.isNotEmpty)
+                  Text(
+                    'This order is your board\'s layout — drag to match the '
+                    'physical board (needed for the board view and auto jail/tax/GO).',
+                    style: textTheme.bodySmall
+                        ?.copyWith(color: scheme.onSurfaceVariant),
+                  ),
+                if (_properties.isEmpty)
+                  Text(
+                    'No properties yet.',
+                    style: textTheme.bodySmall
+                        ?.copyWith(color: scheme.onSurfaceVariant),
+                  ),
+              ]),
+            ),
+          ),
+          if (_properties.isNotEmpty)
+            SliverPadding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              sliver: SliverReorderableList(
+                itemCount: _properties.length,
+                onReorder: (oldIndex, newIndex) {
+                  setState(() {
+                    if (newIndex > oldIndex) newIndex -= 1;
+                    final moved = _properties.removeAt(oldIndex);
+                    _properties.insert(newIndex, moved);
+                  });
+                },
+                // SliverReorderableList (unlike ReorderableListView) doesn't
+                // wrap the dragged item in a Material by default, so a
+                // ListTile mid-drag loses its Material ancestor.
+                proxyDecorator: (child, index, animation) => Material(
+                  elevation: 4,
+                  color: Colors.transparent,
+                  child: child,
+                ),
+                itemBuilder: (context, i) => ListTile(
+                  key: ValueKey(_properties[i].id),
+                  contentPadding: EdgeInsets.zero,
+                  onTap: () => _editProperty(_properties[i]),
+                  leading: Container(
+                    width: 14,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: Color(_properties[i].colorValue),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                  ),
+                  title: Text(
+                    _properties[i].name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: textTheme.bodyLarge
+                        ?.copyWith(fontWeight: FontWeight.w600),
+                  ),
+                  subtitle: Text(
+                    '${_kindLabel(_properties[i].kind)}'
+                    '${_properties[i].kind.isOwnable ? ' · ${formatMoney(_properties[i].price, symbol)}' : ''}',
+                    style: textTheme.bodySmall
+                        ?.copyWith(color: scheme.onSurfaceVariant),
+                  ),
+                  trailing: ReorderableDragStartListener(
+                    index: i,
+                    child: Icon(
+                      Icons.drag_handle_rounded,
+                      color: scheme.onSurfaceVariant,
+                    ),
                   ),
                 ),
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: TextField(
-                  controller: _salaryController,
-                  keyboardType: TextInputType.number,
-                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                  decoration: const InputDecoration(
-                    labelText: 'GO salary',
+            ),
+          SliverPadding(
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 40),
+            sliver: SliverList(
+              delegate: SliverChildListDelegate([
+                SectionHeader(
+                  title: 'Chance cards (${_chanceCards.length})',
+                  trailing: TextButton.icon(
+                    onPressed: () => _editCard(_chanceCards),
+                    icon: const Icon(Icons.add_rounded, size: 20),
+                    label: const Text('Add'),
                   ),
                 ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 20),
-          SectionHeader(
-            title: 'Properties (${_properties.length})',
-            trailing: TextButton.icon(
-              onPressed: () => _editProperty(),
-              icon: const Icon(Icons.add_rounded, size: 20),
-              label: const Text('Add'),
-            ),
-          ),
-          if (_properties.isEmpty)
-            Text(
-              'No properties yet.',
-              style:
-                  textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
-            )
-          else
-            for (final property in _properties)
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                onTap: () => _editProperty(property),
-                leading: Container(
-                  width: 14,
-                  height: 40,
-                  decoration: BoxDecoration(
-                    color: Color(property.colorValue),
-                    borderRadius: BorderRadius.circular(4),
+                _CardList(
+                  cards: _chanceCards,
+                  symbol: symbol,
+                  onTap: (card) => _editCard(_chanceCards, card),
+                ),
+                const SizedBox(height: 16),
+                SectionHeader(
+                  title: 'Community chest (${_communityCards.length})',
+                  trailing: TextButton.icon(
+                    onPressed: () => _editCard(_communityCards),
+                    icon: const Icon(Icons.add_rounded, size: 20),
+                    label: const Text('Add'),
                   ),
                 ),
-                title: Text(
-                  property.name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style:
-                      textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.w600),
+                _CardList(
+                  cards: _communityCards,
+                  symbol: symbol,
+                  onTap: (card) => _editCard(_communityCards, card),
                 ),
-                subtitle: Text(
-                  '${property.kind.name} · ${formatMoney(property.price, symbol)}',
-                  style: textTheme.bodySmall
-                      ?.copyWith(color: scheme.onSurfaceVariant),
-                ),
-                trailing: const Icon(Icons.chevron_right_rounded),
-              ),
-          const SizedBox(height: 16),
-          SectionHeader(
-            title: 'Chance cards (${_chanceCards.length})',
-            trailing: TextButton.icon(
-              onPressed: () => _editCard(_chanceCards),
-              icon: const Icon(Icons.add_rounded, size: 20),
-              label: const Text('Add'),
+              ]),
             ),
-          ),
-          _CardList(
-            cards: _chanceCards,
-            symbol: symbol,
-            onTap: (card) => _editCard(_chanceCards, card),
-          ),
-          const SizedBox(height: 16),
-          SectionHeader(
-            title: 'Community chest (${_communityCards.length})',
-            trailing: TextButton.icon(
-              onPressed: () => _editCard(_communityCards),
-              icon: const Icon(Icons.add_rounded, size: 20),
-              label: const Text('Add'),
-            ),
-          ),
-          _CardList(
-            cards: _communityCards,
-            symbol: symbol,
-            onTap: (card) => _editCard(_communityCards, card),
           ),
         ],
       ),
@@ -332,6 +387,19 @@ class _CardList extends StatelessWidget {
 // Property editing sheet
 // ---------------------------------------------------------------------------
 
+String _kindLabel(PropertyKind kind) => switch (kind) {
+      PropertyKind.street => 'Street',
+      PropertyKind.railroad => 'Railroad',
+      PropertyKind.utility => 'Utility',
+      PropertyKind.go => 'GO',
+      PropertyKind.jail => 'Jail',
+      PropertyKind.freeParking => 'Free Parking',
+      PropertyKind.goToJail => 'Go To Jail',
+      PropertyKind.tax => 'Tax',
+      PropertyKind.chance => 'Chance',
+      PropertyKind.communityChest => 'Community Chest',
+    };
+
 const _groupColors = [
   0xFF8B4513, // brown
   0xFF87CEEB, // light blue
@@ -400,6 +468,14 @@ class _PropertySheetState extends State<_PropertySheet> {
             'Own 4',
           ],
         PropertyKind.utility => const ['×1 owned', '×2 owned'],
+        PropertyKind.go ||
+        PropertyKind.jail ||
+        PropertyKind.freeParking ||
+        PropertyKind.goToJail ||
+        PropertyKind.tax ||
+        PropertyKind.chance ||
+        PropertyKind.communityChest =>
+          const [],
       };
 
   @override
@@ -482,120 +558,124 @@ class _PropertySheetState extends State<_PropertySheet> {
               decoration: const InputDecoration(labelText: 'Name'),
             ),
             const SizedBox(height: 12),
-            SegmentedButton<PropertyKind>(
-              segments: const [
-                ButtonSegment(
-                  value: PropertyKind.street,
-                  label: Text('Street'),
-                ),
-                ButtonSegment(
-                  value: PropertyKind.railroad,
-                  label: Text('Railroad'),
-                ),
-                ButtonSegment(
-                  value: PropertyKind.utility,
-                  label: Text('Utility'),
-                ),
+            DropdownButtonFormField<PropertyKind>(
+              initialValue: _kind,
+              decoration: const InputDecoration(labelText: 'Kind'),
+              items: [
+                for (final kind in PropertyKind.values)
+                  DropdownMenuItem(value: kind, child: Text(_kindLabel(kind))),
               ],
-              selected: {_kind},
-              onSelectionChanged: (selection) =>
-                  setState(() => _kind = selection.first),
+              onChanged: (kind) {
+                if (kind != null) setState(() => _kind = kind);
+              },
             ),
             const SizedBox(height: 16),
-            Wrap(
-              spacing: 10,
-              runSpacing: 10,
-              children: [
-                for (final color in _groupColors)
-                  GestureDetector(
-                    onTap: () => setState(() => _color = color),
-                    child: Container(
-                      width: 34,
-                      height: 34,
-                      decoration: BoxDecoration(
-                        color: Color(color),
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                          color: _color == color
-                              ? Theme.of(context).colorScheme.onSurface
-                              : Colors.transparent,
-                          width: 2.5,
+            if (_kind.isOwnable) ...[
+              Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                children: [
+                  for (final color in _groupColors)
+                    GestureDetector(
+                      onTap: () => setState(() => _color = color),
+                      child: Container(
+                        width: 34,
+                        height: 34,
+                        decoration: BoxDecoration(
+                          color: Color(color),
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: _color == color
+                                ? Theme.of(context).colorScheme.onSurface
+                                : Colors.transparent,
+                            width: 2.5,
+                          ),
                         ),
+                        child: _color == color
+                            ? const Icon(
+                                Icons.check,
+                                size: 18,
+                                color: Colors.white,
+                              )
+                            : null,
                       ),
-                      child: _color == color
-                          ? const Icon(
-                              Icons.check,
-                              size: 18,
-                              color: Colors.white,
-                            )
-                          : null,
+                    ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _priceController,
+                      keyboardType: TextInputType.number,
+                      inputFormatters: [
+                        FilteringTextInputFormatter.digitsOnly,
+                      ],
+                      decoration: const InputDecoration(labelText: 'Price'),
                     ),
                   ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _priceController,
-                    keyboardType: TextInputType.number,
-                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                    decoration: const InputDecoration(labelText: 'Price'),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: TextField(
-                    controller: _mortgageController,
-                    keyboardType: TextInputType.number,
-                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                    decoration: const InputDecoration(labelText: 'Mortgage'),
-                  ),
-                ),
-                if (_kind == PropertyKind.street) ...[
                   const SizedBox(width: 12),
                   Expanded(
                     child: TextField(
-                      controller: _houseController,
+                      controller: _mortgageController,
                       keyboardType: TextInputType.number,
                       inputFormatters: [
                         FilteringTextInputFormatter.digitsOnly,
                       ],
-                      decoration:
-                          const InputDecoration(labelText: 'House cost'),
+                      decoration: const InputDecoration(labelText: 'Mortgage'),
                     ),
                   ),
+                  if (_kind == PropertyKind.street) ...[
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: TextField(
+                        controller: _houseController,
+                        keyboardType: TextInputType.number,
+                        inputFormatters: [
+                          FilteringTextInputFormatter.digitsOnly,
+                        ],
+                        decoration:
+                            const InputDecoration(labelText: 'House cost'),
+                      ),
+                    ),
+                  ],
                 ],
-              ],
-            ),
-            const SizedBox(height: 16),
-            Text(
-              _kind == PropertyKind.utility
-                  ? 'Rent multipliers (rent = dice × multiplier)'
-                  : 'Rents',
-              style:
-                  textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w800),
-            ),
-            const SizedBox(height: 10),
-            Wrap(
-              spacing: 10,
-              runSpacing: 10,
-              children: [
-                for (var i = 0; i < labels.length; i++)
-                  SizedBox(
-                    width: 104,
-                    child: TextField(
-                      controller: _rentControllers[i],
-                      keyboardType: TextInputType.number,
-                      inputFormatters: [
-                        FilteringTextInputFormatter.digitsOnly,
-                      ],
-                      decoration: InputDecoration(labelText: labels[i]),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                _kind == PropertyKind.utility
+                    ? 'Rent multipliers (rent = dice × multiplier)'
+                    : 'Rents',
+                style: textTheme.titleSmall
+                    ?.copyWith(fontWeight: FontWeight.w800),
+              ),
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                children: [
+                  for (var i = 0; i < labels.length; i++)
+                    SizedBox(
+                      width: 104,
+                      child: TextField(
+                        controller: _rentControllers[i],
+                        keyboardType: TextInputType.number,
+                        inputFormatters: [
+                          FilteringTextInputFormatter.digitsOnly,
+                        ],
+                        decoration: InputDecoration(labelText: labels[i]),
+                      ),
                     ),
-                  ),
-              ],
-            ),
+                ],
+              ),
+            ] else if (_kind == PropertyKind.tax)
+              TextField(
+                controller: _priceController,
+                keyboardType: TextInputType.number,
+                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                decoration: const InputDecoration(labelText: 'Tax amount'),
+              ),
             const SizedBox(height: 20),
             FilledButton(onPressed: _save, child: const Text('Save property')),
           ],
