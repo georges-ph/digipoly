@@ -46,3 +46,6 @@ app.*.map.json
 
 # Bundled web build served by the game server (created by tool/bundle_web_app)
 assets/web/web_app.zip
+
+# Output folder for Windows builds
+output/
