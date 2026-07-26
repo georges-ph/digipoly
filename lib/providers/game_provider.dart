@@ -72,6 +72,7 @@ class GameProvider extends ChangeNotifier {
 
   final _errors = StreamController<String>.broadcast();
   final _cardDraws = StreamController<CardDrawEvent>.broadcast();
+  final _diceRolls = StreamController<DiceRoll>.broadcast();
   String? _outgoingRequestId;
 
   // ------------------------------------------------------------- Getters
@@ -81,6 +82,10 @@ class GameProvider extends ChangeNotifier {
 
   /// Cards drawn at the table — every device shows them.
   Stream<CardDrawEvent> get cardDraws => _cardDraws.stream;
+
+  /// Every dice roll anyone makes — every device sees it, so the board can
+  /// pop up automatically wherever players are looking.
+  Stream<DiceRoll> get diceRolls => _diceRolls.stream;
 
   bool get hasActiveSession => _record != null && _client != null;
   GameRecord? get record => _record;
@@ -740,6 +745,7 @@ class GameProvider extends ChangeNotifier {
         final json = message.payload['roll'] as Map<String, dynamic>?;
         if (json != null) {
           _lastRoll = DiceRoll.fromJson(json);
+          _diceRolls.add(_lastRoll!);
           _turnRolled = message.payload['turnRolled'] as bool? ?? true;
           _freeParkingPot =
               message.payload['freeParkingPot'] as int? ?? _freeParkingPot;
@@ -936,6 +942,7 @@ class GameProvider extends ChangeNotifier {
     closeSession();
     _errors.close();
     _cardDraws.close();
+    _diceRolls.close();
     super.dispose();
   }
 }

@@ -109,8 +109,6 @@ class DashboardScreen extends StatelessWidget {
             BoardLayoutView(
               board: game.board,
               players: session.players,
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
               onTapProperty: (property) => Navigator.of(context).push(
                 MaterialPageRoute(
                   builder: (_) =>

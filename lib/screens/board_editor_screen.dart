@@ -9,6 +9,7 @@ import '../providers/boards_provider.dart';
 import '../theme/app_theme.dart';
 import '../utils/formatting.dart';
 import '../utils/snack.dart';
+import '../widgets/ring_board.dart';
 import '../widgets/section_header.dart';
 
 /// Create or edit a board template: money rules, properties, chance and
@@ -43,6 +44,8 @@ class _BoardEditorScreenState extends State<BoardEditorScreen> {
   late final List<BoardCard> _chanceCards = List.of(_base.chanceCards);
   late final List<BoardCard> _communityCards =
       List.of(_base.communityChestCards);
+
+  bool _boardView = true;
 
   @override
   void dispose() {
@@ -206,16 +209,39 @@ class _BoardEditorScreenState extends State<BoardEditorScreen> {
                 const SizedBox(height: 20),
                 SectionHeader(
                   title: 'Properties (${_properties.length})',
-                  trailing: TextButton.icon(
-                    onPressed: () => _editProperty(),
-                    icon: const Icon(Icons.add_rounded, size: 20),
-                    label: const Text('Add'),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (_properties.isNotEmpty)
+                        IconButton(
+                          tooltip: _boardView
+                              ? 'Switch to list view'
+                              : 'Switch to board view',
+                          onPressed: () =>
+                              setState(() => _boardView = !_boardView),
+                          icon: Icon(
+                            _boardView
+                                ? Icons.view_list_rounded
+                                : Icons.grid_view_rounded,
+                          ),
+                        ),
+                      TextButton.icon(
+                        onPressed: () => _editProperty(),
+                        icon: const Icon(Icons.add_rounded, size: 20),
+                        label: const Text('Add'),
+                      ),
+                    ],
                   ),
                 ),
                 if (_properties.isNotEmpty)
                   Text(
-                    'This order is your board\'s layout — drag to match the '
-                    'physical board (needed for the board view and auto jail/tax/GO).',
+                    _boardView
+                        ? 'This is your board\'s physical layout — long-press '
+                            'and drag a square to match the real board '
+                            '(needed for the board view and auto jail/tax/GO).'
+                        : 'This order is your board\'s layout — drag to '
+                            'match the physical board (needed for the board '
+                            'view and auto jail/tax/GO).',
                     style: textTheme.bodySmall
                         ?.copyWith(color: scheme.onSurfaceVariant),
                   ),
@@ -225,10 +251,25 @@ class _BoardEditorScreenState extends State<BoardEditorScreen> {
                     style: textTheme.bodySmall
                         ?.copyWith(color: scheme.onSurfaceVariant),
                   ),
+                if (_properties.isNotEmpty && _boardView) ...[
+                  const SizedBox(height: 12),
+                  _BoardRingEditor(
+                    properties: _properties,
+                    symbol: symbol,
+                    onTapProperty: _editProperty,
+                    onAdd: () => _editProperty(),
+                    onReorder: (oldIndex, newIndex) {
+                      setState(() {
+                        final moved = _properties.removeAt(oldIndex);
+                        _properties.insert(newIndex, moved);
+                      });
+                    },
+                  ),
+                ],
               ]),
             ),
           ),
-          if (_properties.isNotEmpty)
+          if (_properties.isNotEmpty && !_boardView)
             SliverPadding(
               padding: const EdgeInsets.symmetric(horizontal: 20),
               sliver: SliverReorderableList(
@@ -318,6 +359,175 @@ class _BoardEditorScreenState extends State<BoardEditorScreen> {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Board ring editor — properties arranged as a physical ring around a
+// square grid, matching the real board, instead of a linear list.
+// ---------------------------------------------------------------------------
+
+class _BoardRingEditor extends StatelessWidget {
+  const _BoardRingEditor({
+    required this.properties,
+    required this.symbol,
+    required this.onTapProperty,
+    required this.onAdd,
+    required this.onReorder,
+  });
+
+  final List<Property> properties;
+  final String symbol;
+  final void Function(Property property) onTapProperty;
+  final VoidCallback onAdd;
+  final void Function(int oldIndex, int newIndex) onReorder;
+
+  @override
+  Widget build(BuildContext context) {
+    return RingBoard(
+      squareCount: properties.length,
+      cellBuilder: (context, i, cellSize) {
+        if (i >= properties.length) {
+          return _EmptyRingSlot(onTap: onAdd);
+        }
+        return _RingTile(
+          property: properties[i],
+          index: i,
+          cellSize: cellSize,
+          onTap: () => onTapProperty(properties[i]),
+          onReorder: onReorder,
+        );
+      },
+    );
+  }
+}
+
+class _RingTile extends StatelessWidget {
+  const _RingTile({
+    required this.property,
+    required this.index,
+    required this.cellSize,
+    required this.onTap,
+    required this.onReorder,
+  });
+
+  final Property property;
+  final int index;
+  final Size cellSize;
+  final VoidCallback onTap;
+  final void Function(int oldIndex, int newIndex) onReorder;
+
+  @override
+  Widget build(BuildContext context) {
+    final tile = _RingTileVisual(property: property, cellSize: cellSize);
+
+    return DragTarget<int>(
+      onWillAcceptWithDetails: (details) => details.data != index,
+      onAcceptWithDetails: (details) => onReorder(details.data, index),
+      builder: (context, candidateData, rejectedData) {
+        return LongPressDraggable<int>(
+          data: index,
+          feedback: Material(
+            color: Colors.transparent,
+            elevation: 6,
+            borderRadius: BorderRadius.circular(10),
+            child: SizedBox.fromSize(size: cellSize, child: tile),
+          ),
+          childWhenDragging: Opacity(opacity: 0.25, child: tile),
+          child: InkWell(
+            onTap: onTap,
+            borderRadius: BorderRadius.circular(10),
+            child: candidateData.isNotEmpty
+                ? DecoratedBox(
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                        color: Theme.of(context).colorScheme.primary,
+                        width: 2,
+                      ),
+                    ),
+                    child: tile,
+                  )
+                : tile,
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _RingTileVisual extends StatelessWidget {
+  const _RingTileVisual({required this.property, required this.cellSize});
+
+  final Property property;
+  final Size cellSize;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+    final bandColor =
+        property.kind.isOwnable ? Color(property.colorValue) : scheme.outline;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: scheme.outlineVariant),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(height: 6, color: bandColor),
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 2),
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: SizedBox(
+                  width: cellSize.width - 10,
+                  child: Text(
+                    property.name,
+                    textAlign: TextAlign.center,
+                    maxLines: 4,
+                    overflow: TextOverflow.ellipsis,
+                    style: textTheme.labelSmall
+                        ?.copyWith(fontWeight: FontWeight.w700),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _EmptyRingSlot extends StatelessWidget {
+  const _EmptyRingSlot({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(10),
+      child: Container(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: scheme.outlineVariant.withValues(alpha: 0.5)),
+        ),
+        child: Icon(
+          Icons.add_rounded,
+          size: 16,
+          color: scheme.outlineVariant,
+        ),
       ),
     );
   }

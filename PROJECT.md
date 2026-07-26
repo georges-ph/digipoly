@@ -226,7 +226,7 @@ event — it settles like any other payment, via `paymentApplied`.
   respondToIncomingRequest/rollDice/drawCard/editTransactionNote/
   payJailFine/endTurn), reconnect, LAN IP
   (`roomEndpoint` — network_info_plus with NetworkInterface fallback for
-  Windows), `errors` + `cardDraws` streams,
+  Windows), `errors` + `cardDraws` + `diceRolls` streams,
   `canAct`/`canResolve`/`canRoll`/`canEndTurn`/`canPayJailFine`,
   `freeParkingPot`.
 - `GamesProvider` (home list), `BoardsProvider` (board CRUD).
@@ -249,18 +249,35 @@ Flat layout: `lib/screens`, `lib/widgets`, `lib/theme`, `lib/utils`.
   layout**, since it pays automatically then), players row (balances under
   names, accent ring = current turn, long-press → send/request/payment
   card), properties summary, activity teaser (10) → `activity_screen`
-  (full). App-bar menu gains a **Board** entry (only when the board has a
-  layout) → `board_view_screen`. **Responsive**: ≥900px fills the whole
-  window — banking column (flex 7, 8-column quick actions) + activity pane
-  (flex 3); narrow stays a max-640 column. Global listeners here:
-  incoming-request dialog, card-drawn dialog, NFC watch (only acts when
-  this screen is top-most).
-- `board_view_screen` + `widgets/board_layout_view.dart` — read-only render
-  of `Board.properties` in list order (a wrapping grid in reading order,
-  not a geometrically accurate ring — that and animated movement are
-  deferred) with every player's token at their current square; tapping an
-  ownable square opens `properties_screen` (`openPropertyId`). Shared by
-  `game_screen`'s Board entry and embedded in `dashboard_screen`.
+  (full). On boards with a curated layout, an app-bar toggle
+  (`widgets/ring_board.dart`-backed `BoardLayoutView` in a non-modal
+  `showBottomSheet` panel, so it doesn't block the rest of the screen or
+  dismiss on an outside tap) shows/hides the board on demand, and it also
+  **pops up automatically on any roll** (`GameProvider.diceRolls` stream —
+  every device sees every roll, so token movement is visible wherever a
+  player is looking) if it isn't already open. **Responsive**: ≥900px
+  fills the whole window — banking column (flex 7, 8-column quick actions)
+  + activity pane (flex 3); narrow stays a max-640 column. Global
+  listeners here: incoming-request dialog, card-drawn dialog,
+  board-popup-on-roll, NFC watch (only acts when this screen is
+  top-most).
+- `widgets/board_layout_view.dart` — read-only render of `Board.properties`
+  as a **physical ring** around a square grid
+  (`widgets/ring_board.dart` + `utils/board_ring.dart`: perimeter cells of
+  the smallest NxN grid that fits the square count, board-agnostic — a
+  classic 40-square board gets an 11x11 grid, same as the real thing),
+  corner-to-corner in list order, with every player's token shown as a
+  small `PlayerAvatar` (initials + their consistent color, not just a
+  plain dot) at their current square; tapping an ownable square opens
+  `properties_screen` (`openPropertyId`). `RingBoard` renders
+  **rectangular** edge squares (tall/narrow on top & bottom, wide/short on
+  the sides, like a real board) with big square corners rather than
+  forcing every square to the same small square, scaled to fit the
+  available width via a plain `FittedBox` — **static, no scroll, no zoom**
+  (earlier scroll/pinch-zoom versions were tried and explicitly rejected;
+  don't reintroduce `InteractiveViewer` or scrollables here). Shared by
+  `game_screen`'s board toggle/popup and embedded in `dashboard_screen`.
+  Token movement is instant, not animated (still deferred).
 - `properties_screen` — search, ownership list (ownable kinds only —
   specials live in the board view, not here), per-property sheet (rent
   table, buy/pay-rent/build with **confirmation dialogs**, errors shown
@@ -271,11 +288,15 @@ Flat layout: `lib/screens`, `lib/widgets`, `lib/theme`, `lib/utils`.
 - `dashboard_screen` — table-wide view for big screens (players grid, turn +
   dice banner, shared activity feed, and the board view when the board has
   a layout).
-- `board_editor_screen` — properties list is a `ReorderableListView`: drag
-  order **is** the board layout. Adding a property picks any `PropertyKind`
-  (not just street/railroad/utility) via a dropdown; ownable-only fields
-  (color, price, mortgage, house cost, rent tiers) show conditionally, Tax
-  shows a single amount field (`Property.price` reused), other specials
+- `board_editor_screen` — properties order **is** the board layout, edited
+  either as a `RingBoard` (default — long-press and drag a square to where
+  it belongs, tap to edit, empty ring slots add there) or, via a toggle, a
+  `SliverReorderableList` inside a `CustomScrollView` (drag near the top/
+  bottom edge auto-scrolls the page). Adding a property picks any
+  `PropertyKind` (not just street/railroad/utility) via a dropdown;
+  ownable-only fields (color, price, mortgage, house cost, rent tiers)
+  show conditionally, Tax shows a single amount field (`Property.price`
+  reused), other specials
   need only a name.
 - `scan_pay_screen` (mobile_scanner; `canScanQr` excludes Windows/Linux),
   `receive_money_sheet` (my QR, optional fixed amount, auto-closes when

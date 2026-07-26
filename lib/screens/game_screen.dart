@@ -9,6 +9,7 @@ import 'package:uuid/uuid.dart';
 import 'dart:math';
 
 import '../models/board.dart';
+import '../models/dice_roll.dart';
 import '../models/player.dart';
 import '../models/result.dart';
 import '../providers/boards_provider.dart';
@@ -20,13 +21,13 @@ import '../utils/formatting.dart';
 import '../utils/snack.dart';
 import '../widgets/activity_feed.dart';
 import '../widgets/balance_card.dart';
+import '../widgets/board_layout_view.dart';
 import '../widgets/player_avatar.dart';
 import '../widgets/quick_action_button.dart';
 import '../widgets/player_card_sheet.dart';
 import '../widgets/receive_money_sheet.dart';
 import '../widgets/section_header.dart';
 import 'activity_screen.dart';
-import 'board_view_screen.dart';
 import 'dashboard_screen.dart';
 import 'properties_screen.dart';
 import 'scan_pay_screen.dart';
@@ -43,11 +44,14 @@ class GameScreen extends StatefulWidget {
 }
 
 class _GameScreenState extends State<GameScreen> {
+  final _scaffoldKey = GlobalKey<ScaffoldState>();
   StreamSubscription<String>? _errorSub;
   StreamSubscription<CardDrawEvent>? _cardDrawSub;
+  StreamSubscription<DiceRoll>? _diceRollSub;
   final _nfc = NfcService.instance;
   GameProvider? _session;
   bool _requestDialogOpen = false;
+  PersistentBottomSheetController? _boardSheetController;
 
   @override
   void initState() {
@@ -60,6 +64,13 @@ class _GameScreenState extends State<GameScreen> {
     });
     _cardDrawSub = session.cardDraws.listen((event) {
       if (mounted) _showCardDialog(event);
+    });
+    // Every roll (anyone's) pops the board up so token movement is visible
+    // wherever a player is looking — only on boards with a curated layout,
+    // and only if it isn't already open.
+    _diceRollSub = session.diceRolls.listen((_) {
+      if (!mounted || _boardSheetController != null) return;
+      if ((_session?.game?.board.goIndex ?? -1) >= 0) _toggleBoardSheet();
     });
     // Money requests pop as a dialog wherever the player currently is.
     session.addListener(_maybeShowRequestDialog);
@@ -78,9 +89,29 @@ class _GameScreenState extends State<GameScreen> {
   void dispose() {
     _errorSub?.cancel();
     _cardDrawSub?.cancel();
+    _diceRollSub?.cancel();
     _session?.removeListener(_maybeShowRequestDialog);
     _nfc.stopWatch();
     super.dispose();
+  }
+
+  /// Shows/hides the board as a non-modal panel docked to the bottom of the
+  /// screen — stays out of the way of the rest of the app, and (unlike a
+  /// modal sheet) doesn't get dismissed by tapping elsewhere.
+  void _toggleBoardSheet() {
+    final controller = _boardSheetController;
+    if (controller != null) {
+      controller.close();
+      return;
+    }
+    final opened = _scaffoldKey.currentState?.showBottomSheet(
+      (_) => _BoardSheet(onClose: _toggleBoardSheet),
+    );
+    if (opened == null) return;
+    setState(() => _boardSheetController = opened);
+    opened.closed.whenComplete(() {
+      if (mounted) setState(() => _boardSheetController = null);
+    });
   }
 
   void _maybeShowRequestDialog() {
@@ -557,9 +588,23 @@ class _GameScreenState extends State<GameScreen> {
     }
 
     return Scaffold(
+      key: _scaffoldKey,
       appBar: AppBar(
         title: Text(game.name),
         actions: [
+          if (game.board.goIndex >= 0)
+            IconButton(
+              onPressed: _toggleBoardSheet,
+              icon: Icon(
+                Icons.grid_view_rounded,
+                color: _boardSheetController == null
+                    ? null
+                    : Theme.of(context).colorScheme.primary,
+              ),
+              tooltip: _boardSheetController == null
+                  ? 'Show board'
+                  : 'Hide board',
+            ),
           IconButton(
             onPressed: _showRoomInfo,
             icon: const Icon(Icons.qr_code_rounded),
@@ -571,10 +616,6 @@ class _GameScreenState extends State<GameScreen> {
                 case 'myCard':
                   final me = context.read<GameProvider>().me;
                   if (me != null) _showPlayerCard(me);
-                case 'board':
-                  Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => const BoardViewScreen()),
-                  );
                 case 'dashboard':
                   Navigator.of(context).push(
                     MaterialPageRoute(
@@ -591,13 +632,6 @@ class _GameScreenState extends State<GameScreen> {
                 value: 'myCard',
                 child: Text('My payment card'),
               ),
-              // Only meaningful once the board has a curated layout —
-              // otherwise there are no token positions to show.
-              if (game.board.goIndex >= 0)
-                const PopupMenuItem(
-                  value: 'board',
-                  child: Text('Board'),
-                ),
               const PopupMenuItem(
                 value: 'dashboard',
                 child: Text('Dashboard'),
@@ -960,6 +994,71 @@ class _GameScreenState extends State<GameScreen> {
           ),
         );
       },
+    );
+  }
+}
+
+/// A compact, non-modal panel showing the board and every token — pops up
+/// automatically on any roll (see `_diceRollSub` in [_GameScreenState]) and
+/// toggles via the app-bar button. Non-modal so it doesn't block the rest
+/// of the screen or get dismissed by tapping elsewhere.
+class _BoardSheet extends StatelessWidget {
+  const _BoardSheet({required this.onClose});
+
+  // Persistent (non-modal) bottom sheets aren't on the Navigator stack —
+  // there's no route to pop — so closing goes through the controller in
+  // [_GameScreenState] instead.
+  final VoidCallback onClose;
+
+  @override
+  Widget build(BuildContext context) {
+    final session = context.watch<GameProvider>();
+    final board = session.game?.board;
+    if (board == null) return const SizedBox.shrink();
+
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 10, 8, 12),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              children: [
+                Text(
+                  'Board',
+                  style: Theme.of(context)
+                      .textTheme
+                      .titleMedium
+                      ?.copyWith(fontWeight: FontWeight.w800),
+                ),
+                const Spacer(),
+                IconButton(
+                  onPressed: onClose,
+                  icon: const Icon(Icons.close_rounded),
+                  tooltip: 'Hide board',
+                ),
+              ],
+            ),
+            // Capped so the 1:1 aspect ratio can't force the board taller
+            // than the sheet has room for on a wide (e.g. maximized
+            // Windows) window — it ties height to width.
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 420),
+              child: BoardLayoutView(
+                board: board,
+                players: session.players,
+                onTapProperty: (property) => Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) =>
+                        PropertiesScreen(openPropertyId: property.id),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
