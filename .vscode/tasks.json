@@ -1,0 +1,57 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Bundle web app",
+      "detail": "Builds the Flutter web app and zips it into assets/web/web_app.zip so the game server can serve it to browser-joining players.",
+      "type": "shell",
+      "command": "powershell.exe",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "${workspaceFolder}/tool/bundle_web_app.ps1"
+      ],
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": true
+      }
+    },
+    {
+      "label": "Build Android APK",
+      "type": "shell",
+      "command": "flutter",
+      "args": ["build", "apk"],
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      }
+    },
+    {
+      "label": "Build Windows",
+      "type": "shell",
+      "command": "flutter",
+      "args": ["build", "windows"],
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      }
+    },
+    {
+      "label": "Build all (bundle web + Android + Windows)",
+      "detail": "Runs the three tasks above in order, so the web-join bundle is fresh in both native builds.",
+      "dependsOn": ["Bundle web app", "Build Android APK", "Build Windows"],
+      "dependsOrder": "sequence",
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": []
+    }
+  ]
+}

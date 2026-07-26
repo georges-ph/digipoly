@@ -364,7 +364,7 @@ Flat layout: `lib/screens`, `lib/widgets`, `lib/theme`, `lib/utils`.
 - Room QR (game app bar) encodes `http://<ip>:47912/`; the same link is
   what the room-info sheet copies, and the Join screen's manual field
   accepts a pasted link as well as a bare IP.
-  The server can serve the **web app itself**: `tool/bundle_web_app.ps1|.sh`
+  The server can serve the **web app itself**: `tool/bundle_web_app.ps1`
   builds web + zips into `assets/web/web_app.zip` (gitignored); server
   serves it via a shelf Cascade. Scanning the QR on any phone opens the
   game in the browser → `web_join_screen` asks a name → joins directly.
@@ -389,10 +389,14 @@ Flat layout: `lib/screens`, `lib/widgets`, `lib/theme`, `lib/utils`.
 
 ```
 flutter pub get
-flutter run                  # Windows or Android
-flutter analyze && flutter test    # keep both clean (engine has unit tests)
-./tool/bundle_web_app.sh     # optional: embed web build for browser-join
+flutter run                     # Windows or Android
+flutter analyze && flutter test # keep both clean (engine has unit tests)
+.\tool\bundle_web_app.ps1       # optional: embed web build for browser-join
 ```
+
+VS Code task "Build all (bundle web + Android + Windows)" (`.vscode/tasks.json`,
+bound to the default build task) runs the web bundle then both native builds
+in sequence, so the embedded web app is always fresh.
 
 Android manifest already has INTERNET/multicast/NFC permissions. iOS folder
 doesn't exist (would need bonsoir Info.plist keys + NFC entitlements).
