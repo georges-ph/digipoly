@@ -809,6 +809,12 @@ class _PropertySheetState extends State<_PropertySheet> {
     final canAct = session.canAct;
     final canResolve = session.canResolve;
     final isStreet = property.kind == PropertyKind.street;
+    // A plain buy is only for the square you're actually standing on — a
+    // table-held auction (below) is the exception, since its winner needn't
+    // be the one who landed here. Boards with no curated layout track no
+    // position at all, so the restriction doesn't apply to them.
+    final onThisSquare = board.goIndex < 0 ||
+        session.me?.position == board.properties.indexOf(property);
 
     return SafeArea(
       child: SingleChildScrollView(
@@ -864,15 +870,28 @@ class _PropertySheetState extends State<_PropertySheet> {
             const SizedBox(height: 20),
             if (owner == null) ...[
               FilledButton.icon(
-                onPressed: canResolve && !_busy ? _buyFlow : null,
+                onPressed: canResolve && !_busy && onThisSquare
+                    ? _buyFlow
+                    : null,
                 icon: const Icon(Icons.shopping_bag_outlined),
                 label: Text(
                   'Buy for ${formatMoney(property.price, currency)}',
                 ),
               ),
-              // Auctions happen out loud at the table (the app doesn't
-              // track token positions, so it can't force one) — the winner
-              // settles here at their bid, on anyone's turn.
+              if (canResolve && !onThisSquare) ...[
+                const SizedBox(height: 6),
+                Center(
+                  child: Text(
+                    "You're not standing here — land on it to buy at "
+                    'list price.',
+                    textAlign: TextAlign.center,
+                    style: textTheme.bodySmall
+                        ?.copyWith(color: scheme.onSurfaceVariant),
+                  ),
+                ),
+              ],
+              // Auctions happen out loud at the table — the winner needn't
+              // be standing here, so this settles on anyone's turn.
               Center(
                 child: TextButton(
                   onPressed: session.connection == ClientStatus.connected &&

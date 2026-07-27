@@ -81,7 +81,14 @@ abstract final class GameEngine {
 
   /// Validates buying [propertyId]. [price] overrides the list price —
   /// that's how a table-held auction settles: the winner buys at their
-  /// bid instead (the physical game trusts the table on the amount).
+  /// bid instead (the physical game trusts the table on the amount), and
+  /// since the winner needn't be standing on the square, an explicit price
+  /// also skips the position check below.
+  ///
+  /// A plain buy (no [price]) is only valid for the square the buyer's
+  /// token is actually on — on a board with a curated layout, that is; a
+  /// board with no layout has no position to check against and allows the
+  /// buy as before.
   static Result<Property> validatePurchase({
     required Board board,
     required Map<String, PropertyOwnership> ownerships,
@@ -96,6 +103,12 @@ abstract final class GameEngine {
     }
     if (ownerships.containsKey(propertyId)) {
       return err('${property.name} is already owned.');
+    }
+    if (price == null && board.goIndex >= 0) {
+      final index = board.properties.indexOf(property);
+      if (buyer.position != index) {
+        return err('You can only buy the square you\'re standing on.');
+      }
     }
     final cost = price ?? property.price;
     if (cost <= 0) return err('The price must be greater than zero.');
