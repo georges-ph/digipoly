@@ -27,6 +27,7 @@ class GameClient {
     required int port,
     required String playerId,
     required String playerName,
+    bool spectator = false,
   }) async {
     await disconnect();
     _setStatus(ClientStatus.connecting);
@@ -50,6 +51,7 @@ class GameClient {
       send(WsMessage(MessageType.joinRequest, {
         'playerId': playerId,
         'name': playerName,
+        if (spectator) 'spectator': true,
       }));
       _setStatus(ClientStatus.connected);
       return ok(null);

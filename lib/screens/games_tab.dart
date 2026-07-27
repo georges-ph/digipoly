@@ -93,6 +93,15 @@ class _GamesTabState extends State<GamesTab> {
     if (mounted) context.read<GamesProvider>().load();
   }
 
+  /// Watches a room's dashboard on a spare screen (a TV, a second window) —
+  /// no seat, no name, nothing added to this device's games list.
+  Future<void> _watch() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const JoinGameScreen(spectator: true)),
+    );
+    if (mounted) await context.read<GameProvider>().closeSession();
+  }
+
   @override
   Widget build(BuildContext context) {
     final games = context.watch<GamesProvider>();
@@ -161,22 +170,31 @@ class _GamesTabState extends State<GamesTab> {
           top: false,
           child: Padding(
             padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
-            child: Row(
+            child: Column(
               children: [
-                Expanded(
-                  child: FilledButton.icon(
-                    onPressed: _host,
-                    icon: const Icon(Icons.add_rounded),
-                    label: const Text('Host game'),
-                  ),
+                Row(
+                  children: [
+                    Expanded(
+                      child: FilledButton.icon(
+                        onPressed: _host,
+                        icon: const Icon(Icons.add_rounded),
+                        label: const Text('Host game'),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: _join,
+                        icon: const Icon(Icons.wifi_tethering_rounded),
+                        label: const Text('Join'),
+                      ),
+                    ),
+                  ],
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: _join,
-                    icon: const Icon(Icons.wifi_tethering_rounded),
-                    label: const Text('Join'),
-                  ),
+                TextButton.icon(
+                  onPressed: _watch,
+                  icon: const Icon(Icons.tv_rounded, size: 18),
+                  label: const Text("Watch a room's dashboard"),
                 ),
               ],
             ),
