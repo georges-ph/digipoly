@@ -89,7 +89,11 @@ board — boards with different names/currencies/properties must all work.
   (`Player.jailTurns`), and the 3rd failed attempt forces paying the fine
   (still moving that roll). Get-out-of-jail-free cards stay physical/
   outside the app (selling one is a plain payment), as before.
-- **Properties**: buy (list price), build houses 0–4 + hotel (=5). Building
+- **Properties**: buy (list price), build houses 0–4 + hotel (=5). A plain
+  buy is only valid for the square your own token is actually on (checked
+  both client- and server-side via `GameEngine.validatePurchase`'s position
+  check) — boards with no curated layout track no position, so the
+  restriction doesn't apply there. Building
   requires owning the **whole color group** and follows the **even-building
   rule**: no street of the group may end up more than one house apart from
   another — building spreads across the group, selling comes off the
@@ -97,14 +101,20 @@ board — boards with different names/currencies/properties must all work.
   ±1). Sell-back refunds half. Rent auto-computed: street tiers, double
   base rent on a full unbuilt group, railroads by count owned, utilities =
   multiplier × dice (uses the payer's own in-app roll automatically).
-- **Auctions settle in-app, run at the table**: even on a board with a
-  curated layout, the app can't know someone *declined* to buy (only where
-  tokens are) — the table holds the auction out loud (physical-game style)
-  and the winner opens the
-  unowned property's sheet → "Won an auction? Buy at your bid" → types the
-  winning bid and buys at that price (`buyProperty` intent with optional
-  `price`; not turn-gated, since auctions arise on other players' turns;
-  the transaction is noted "Auction").
+- **Live auctions**: any connected player can start an auction for an
+  unowned property from its sheet ("Start an auction") — not turn-gated,
+  since auctions arise on other players' turns. Everyone connected sees a
+  shared live `AuctionCard` (game screen, dashboard, and the property
+  sheet) with the current bid and who's leading; anyone can raise it
+  anytime, no turn order, as long as it beats the current bid and they can
+  afford it; anyone can close it, selling to the top bidder at their bid
+  (skips the "must be standing on it" check, same as any explicit-price
+  buy) or cancelling if nobody bid. State lives server-side only
+  (`GameServer._auctions`, `PropertyAuction` model) — not persisted to the
+  DB, but replayed to (re)connecting clients via the snapshot, so a table
+  restart or reconnect doesn't need to restart mid-auction. Wire:
+  `startAuction`/`placeBid`/`closeAuction` intents,
+  `auctionStarted`/`auctionBid`/`auctionClosed`/`auctionRejected` events.
 - **Trades (property transfer)**: the owner hands a deed to another player
   from the property sheet ("Transfer to another player" → pick → confirm).
   No money moves — the deal's cash is a normal Send; buildings must be
@@ -125,15 +135,26 @@ board — boards with different names/currencies/properties must all work.
   backing out **withdraws** the request. Both sides' UI auto-dismisses.
 - **Chance / Community Chest**: quick actions draw a random card from the
   board's deck **on the server**; revealed in a dialog on every device;
-  money effect auto-applied as a `card` transaction. Boards with empty decks
-  get a hint to add cards in the editor.
+  money effect auto-applied as a `card` transaction. A card is either a
+  money card or a **"go to X" move card** (`BoardCard.moveToPropertyId`,
+  authored in the board editor via a Money/Move to property toggle) —
+  drawing one moves the drawer's token straight to that square (paying GO
+  salary if passed/landed on, same as a normal roll) and resolves whatever
+  is there exactly like landing on it normally would; only meaningful on
+  boards with a curated layout. Boards with empty decks get a hint to add
+  cards in the editor.
+- **Landing auto-opens the property sheet**: on a board with a curated
+  layout, whenever your own roll (or a "go to X" card) moves your token
+  onto a street/railroad/utility, that property's sheet pops open right
+  away — buy, pay rent, or manage buildings without digging through
+  Properties (`GameScreen._maybeOpenLandedProperty`, driven by
+  `GameProvider.diceRolls`/`cardDraws`).
 - **Pass GO**: salary, doubled if landed on exactly — automatic on boards
   with a curated layout; a manual quick action on boards without one.
 - **Not modeled on purpose**: bankruptcy, structured trade offers (property
-  transfer + Send covers trades manually), in-app auction bidding (the
-  auction itself happens at the table; only the settlement is in-app),
-  jail escape via a get-out-of-jail-free card (those stay physical; selling
-  one = plain payment) — all candidates for later.
+  transfer + Send covers trades manually), jail escape via a
+  get-out-of-jail-free card (those stay physical; selling one = plain
+  payment) — all candidates for later.
 - The **bank** is account id `"bank"` with infinite money; anyone may
   trigger bank payouts (like trusting the physical banker).
 
@@ -146,7 +167,8 @@ All amounts are `int`. All models are hand-written JSON (`toJson`/`fromJson`)
 
 - `board.dart` — `Board` (currency, startingBalance, salary, jailFine,
   properties, chanceCards/communityChestCards) + `BoardCard` (text, amount:
-  + collect / − pay / 0 none). `goIndex`/`jailIndex` are computed getters
+  + collect / − pay / 0 none; **or** `moveToPropertyId` — a "go to X" card,
+  never both). `goIndex`/`jailIndex` are computed getters
   (first `properties` entry of that kind, or -1) — the board layout is
   just `properties` in physical order, not a separate list.
 - `property.dart` — `Property` (kind, colorValue, price, rentTiers,
@@ -158,35 +180,60 @@ All amounts are `int`. All models are hand-written JSON (`toJson`/`fromJson`)
   order), isHost/isOnline/hasLeft, position (index into `Board.properties`),
   inJail, jailTurns (failed jail-escape attempts). `Player.bankId == 'bank'`.
 - `game.dart` — `Game` (board travels inside it), `GameRecord` (local role:
-  host/client, host address, myPlayerId), `GameSnapshot` (+ freeParkingPot).
+  host/client, host address, myPlayerId), `GameSnapshot` (+ freeParkingPot,
+  + running `auctions`).
 - `game_transaction.dart` — typed: payment, rent, purchase, salary, house,
   request, card, mortgage, tax, freeParking; optional propertyId; note.
 - `property_ownership.dart` — propertyId → ownerId + houses (5 = hotel) +
   mortgaged.
+- `property_auction.dart` — `PropertyAuction` (propertyId, startedBy,
+  currentBid, currentBidderId) — a live, table-held auction; server-memory
+  only, not a DB table (see Live auctions above).
 - `money_request.dart`, `dice_roll.dart`, `ws_message.dart` (envelope:
   `{type, payload}` with `MessageType` enum).
 
 ## Protocol (`ws_message.dart`)
 
-Intents (client→server): `joinRequest`, `paymentIntent` (optional requestId
+Intents (client→server): `joinRequest` (optional `spectator: true` — see
+Spectator mode below), `paymentIntent` (optional requestId
 settles a money request), `buyProperty` (optional price = auction bid),
 `payRent` (optional payerId = owner-side POS charge), `setHouses`,
 `mortgage` (propertyId + mortgage bool), `transferProperty` (propertyId +
 toId; resolves via propertyChanged's txId), `moneyRequest`, `moneyRequestResponse` (decline by target / withdraw by
 requester), `rollDice`, `drawCard`, `editTransactionNote`, `payJailFine`,
-`endTurn`, `leaveGame`.
+`startAuction`, `placeBid`, `closeAuction`, `endTurn`, `leaveGame`.
 
 Events (server→client): `joinAccepted`/`joinRejected`, `snapshot`,
 `paymentApplied` (tx + full player list + freeParkingPot), `paymentRejected`,
 `propertyChanged`, `transactionNoteUpdated`, `moneyRequested`,
 `moneyRequestResolved` (sent to BOTH parties), `diceRolled` (roll +
 turnRolled + full player list, since a curated-layout board also moves
-tokens on every roll + freeParkingPot), `cardDrawn`, `turnChanged`,
-`playerJoined`, `playerLeft`, `presenceChanged`, `gameClosed`.
+tokens on every roll + freeParkingPot), `cardDrawn` (+ full player list,
+since a "go to X" card moves the drawer's token), `turnChanged`,
+`playerJoined`, `playerLeft`, `presenceChanged`, `gameClosed`,
+`auctionStarted`/`auctionBid` (auction state), `auctionClosed`
+(propertyId + winnerId/amount, or cancelled + reason), `auctionRejected`
+(sent only to the sender — bid too low, can't afford it, etc).
 
 Intent ids (txId) make retries idempotent; pending intents resolve via
 completers in `GameProvider` with timeouts. `payJailFine` has no dedicated
-event — it settles like any other payment, via `paymentApplied`.
+event — it settles like any other payment, via `paymentApplied`. Auction
+intents aren't txId/completer-based — they're fire-and-forget like
+`rollDice`/`drawCard`, since bidding is inherently multi-user/live rather
+than a single request-response; rejections surface via the `errors` stream.
+
+### Spectator mode
+
+A read-only viewer (e.g. a TV running the dashboard) joins with
+`spectator: true` in its `joinRequest`. The server (`GameServer._handleSpectate`)
+never creates a `Player`, never binds a playerId to the connection (so no
+intent from it is ever dispatched), and just adds the socket to a
+`_spectators` set that rides every `_broadcast` alongside `_connections`.
+Client-side, `GameProvider.watchRoom` sets `_spectating` and skips all
+local DB persistence (`_persistLocally` gates every write) — a spectator
+session is never saved to this device's games list. `GamesTab`'s "Watch a
+room's dashboard" pushes `JoinGameScreen(spectator: true)`, which lands on
+`DashboardScreen` instead of `GameScreen` and needs no player name.
 
 ## Services (`lib/services/`) — logic lives here, screens stay thin
 
@@ -200,6 +247,9 @@ event — it settles like any other payment, via `paymentApplied`.
   also moves the roller's token and resolves the landing square
   (`_movePlayer`/`_resolveLanding`) on boards with a curated layout;
   `_resolveJailTurn`/`_handlePayJailFine` implement the jail rule.
+  `_handleStartAuction`/`_handlePlaceBid`/`_handleCloseAuction` run live
+  auctions purely in memory (`_auctions`); `_spectators` is a parallel set
+  of read-only sockets that get every broadcast but never a bound playerId.
 - `game_client.dart` — transport only (web_socket_channel).
 - `database_service.dart` — sqflite; v4 schema: `boards`, `games`
   (+current_turn_id, last_roll, turn_rolled — roll state survives a host
@@ -221,14 +271,16 @@ event — it settles like any other payment, via `paymentApplied`.
 
 ## Providers (`lib/providers/`, package:provider)
 
-- `GameProvider` — THE session object (host or client): state, all actions
+- `GameProvider` — THE session object (host or client, or a read-only
+  spectator): state, all actions
   (sendPayment/collectSalary/buyProperty/payRent/setHouses/requestMoney/
   respondToIncomingRequest/rollDice/drawCard/editTransactionNote/
-  payJailFine/endTurn), reconnect, LAN IP
+  payJailFine/startAuction/placeBid/closeAuction/endTurn), `watchRoom`
+  (spectator join), reconnect, LAN IP
   (`roomEndpoint` — network_info_plus with NetworkInterface fallback for
   Windows), `errors` + `cardDraws` + `diceRolls` streams,
   `canAct`/`canResolve`/`canRoll`/`canEndTurn`/`canPayJailFine`,
-  `freeParkingPot`.
+  `freeParkingPot`, `auctions`/`auctionFor`, `isSpectating`.
 - `GamesProvider` (home list), `BoardsProvider` (board CRUD).
 
 ## Screens & UX conventions
@@ -236,7 +288,10 @@ event — it settles like any other payment, via `paymentApplied`.
 Flat layout: `lib/screens`, `lib/widgets`, `lib/theme`, `lib/utils`.
 
 - `home_screen` → `games_tab` (games list; "Live" badge = actually connected
-  now; tapping opens instantly and connects in background) + `boards_tab`
+  now; tapping opens instantly and connects in background; "Watch a room's
+  dashboard" connects read-only as a spectator instead — see Spectator
+  mode — and lands on `dashboard_screen` without adding anything to this
+  list) + `boards_tab`
   (editor, duplicate, clipboard copy/paste, file import/export via
   file_selector — desktop-only save dialog). No boards are bundled by
   default — hosting requires creating or importing at least one.
@@ -255,7 +310,11 @@ Flat layout: `lib/screens`, `lib/widgets`, `lib/theme`, `lib/utils`.
   dismiss on an outside tap) shows/hides the board on demand, and it also
   **pops up automatically on any roll** (`GameProvider.diceRolls` stream —
   every device sees every roll, so token movement is visible wherever a
-  player is looking) if it isn't already open. **Responsive**: ≥900px
+  player is looking) if it isn't already open, and **landing on an
+  ownable square auto-opens that property's sheet** (see the game-rules
+  bullet above). Any running auction shows as an `AuctionCard` above the
+  roll/end-turn row, visible to the whole table regardless of turn.
+  **Responsive**: ≥900px
   fills the whole window — banking column (flex 7, 8-column quick actions)
   + activity pane (flex 3); narrow stays a max-640 column. Global
   listeners here: incoming-request dialog, card-drawn dialog,
@@ -268,7 +327,9 @@ Flat layout: `lib/screens`, `lib/widgets`, `lib/theme`, `lib/utils`.
   classic 40-square board gets an 11x11 grid, same as the real thing),
   corner-to-corner in list order, with every player's token shown as a
   small `PlayerAvatar` (initials + their consistent color, not just a
-  plain dot) at their current square; tapping an ownable square opens
+  plain dot) at their current square, plus who owns each ownable square
+  (a thin strip in the owner's avatar color, a warning tone once
+  mortgaged) and its house/hotel icons; tapping an ownable square opens
   `properties_screen` (`openPropertyId`). `RingBoard` renders
   **rectangular** edge squares (tall/narrow on top & bottom, wide/short on
   the sides, like a real board) with big square corners rather than
@@ -281,13 +342,17 @@ Flat layout: `lib/screens`, `lib/widgets`, `lib/theme`, `lib/utils`.
 - `properties_screen` — search, ownership list (ownable kinds only —
   specials live in the board view, not here), per-property sheet (rent
   table, buy/pay-rent/build with **confirmation dialogs**, errors shown
-  inside the sheet, NFC write).
+  inside the sheet, NFC write). An unowned property with no auction shows
+  Buy plus "Start an auction"; once one's running its `AuctionCard`
+  replaces both.
 - `send_money_screen` — modes pay/collect/request; recipient bubbles; keypad
   (`00` appends atomically); request mode shows the target's balance and
   blocks over-asking; NFC tap-to-pay (amount first → tap card → confirm).
 - `dashboard_screen` — table-wide view for big screens (players grid, turn +
-  dice banner, shared activity feed, and the board view when the board has
-  a layout).
+  dice banner, running `AuctionCard`s, shared activity feed, and the board
+  view when the board has a layout). Reachable either as a normal player
+  (in-game popup menu → Dashboard) or, without ever joining, via
+  `games_tab`'s spectator "Watch" entry.
 - `board_editor_screen` — properties order **is** the board layout, edited
   either as a `RingBoard` (default — long-press and drag a square to where
   it belongs, tap to edit, empty ring slots add there) or, via a toggle, a
@@ -306,7 +371,9 @@ Flat layout: `lib/screens`, `lib/widgets`, `lib/theme`, `lib/utils`.
   (`buildActivityFeed(context, session, limit)` — day headers + running
   balance, shared by game/dashboard/activity), `player_card_sheet` (debit-
   card styled, "Register a physical card"), `player_avatar` (presence dot,
-  highlight ring), `amount_keypad`, `section_header`, `empty_state`.
+  highlight ring), `auction_card.dart` (one live auction: current bid,
+  who's leading, bid box, close button — read-only for spectators),
+  `amount_keypad`, `section_header`, `empty_state`.
 - Theme (`app_theme.dart`): violet fintech accent #635BFF, hero gradient,
   radius 22, light+dark, **platform font only** (no google_fonts —
   offline + flicker), `FloatingLabelBehavior.always` (narrow numeric fields
@@ -416,11 +483,10 @@ Animated token movement (today's board view updates positions instantly,
 no animation) and a geometrically accurate ring layout (today it's a
 reading-order wrapping grid) — both explicitly deferred as a "static
 first" step before polish. Structured trade offers (property+cash in one
-accepted bundle — plain transfer + Send exists), bankruptcy flow, live
-auction bidding UI, settings screen (profile, theme, per-game house-rule
-toggles — e.g. make the strict turn-gating optional, double-GO, or the
-Free Parking pot optional/off), POS mode with PIN for cards, net-worth
-stats/charts from the transaction log, game-end summary, sounds/haptics,
-spectator (view-only dashboard for a TV), community board catalog
+accepted bundle — plain transfer + Send exists), bankruptcy flow, settings
+screen (profile, theme, per-game house-rule toggles — e.g. make the strict
+turn-gating optional, double-GO, or the Free Parking pot optional/off),
+POS mode with PIN for cards, net-worth stats/charts from the transaction
+log, game-end summary, sounds/haptics, community board catalog
 (currently P2P: boards travel with games, clipboard text, .json files; no
 central server by design).
