@@ -1080,6 +1080,7 @@ class _BoardSheet extends StatelessWidget {
               child: BoardLayoutView(
                 board: board,
                 players: session.players,
+                ownerships: session.ownerships,
                 onTapProperty: (property) => Navigator.of(context).push(
                   MaterialPageRoute(
                     builder: (_) =>

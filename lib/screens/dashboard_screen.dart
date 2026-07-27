@@ -109,6 +109,7 @@ class DashboardScreen extends StatelessWidget {
             BoardLayoutView(
               board: game.board,
               players: session.players,
+              ownerships: session.ownerships,
               onTapProperty: (property) => Navigator.of(context).push(
                 MaterialPageRoute(
                   builder: (_) =>

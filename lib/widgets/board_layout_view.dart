@@ -3,24 +3,29 @@ import 'package:flutter/material.dart';
 import '../models/board.dart';
 import '../models/player.dart';
 import '../models/property.dart';
+import '../models/property_ownership.dart';
+import '../theme/app_theme.dart';
 import 'player_avatar.dart';
 import 'ring_board.dart';
 
 /// A read-only render of a board's curated layout — every square in board
 /// order, including specials (GO, Jail, Tax, ...) — arranged as a physical
 /// ring around a square grid (like a real board), with each player's token
-/// shown at their current square. Static: scales to fit the available
-/// width, no scroll or zoom. Animated movement is deferred.
+/// shown at their current square, plus who owns each property and how
+/// built-up it is. Static: scales to fit the available width, no scroll or
+/// zoom. Animated movement is deferred.
 class BoardLayoutView extends StatelessWidget {
   const BoardLayoutView({
     super.key,
     required this.board,
     required this.players,
+    this.ownerships = const {},
     this.onTapProperty,
   });
 
   final Board board;
   final List<Player> players;
+  final Map<String, PropertyOwnership> ownerships;
   final void Function(Property property)? onTapProperty;
 
   @override
@@ -35,6 +40,7 @@ class BoardLayoutView extends StatelessWidget {
         return _SquareTile(
           square: square,
           cellSize: cellSize,
+          ownership: ownerships[square.id],
           tokens: [
             for (final player in activePlayers)
               if (player.position == i) player,
@@ -53,12 +59,14 @@ class _SquareTile extends StatelessWidget {
     required this.square,
     required this.cellSize,
     required this.tokens,
+    this.ownership,
     this.onTap,
   });
 
   final Property square;
   final Size cellSize;
   final List<Player> tokens;
+  final PropertyOwnership? ownership;
   final VoidCallback? onTap;
 
   @override
@@ -67,6 +75,7 @@ class _SquareTile extends StatelessWidget {
     final textTheme = Theme.of(context).textTheme;
     final bandColor =
         square.kind.isOwnable ? Color(square.colorValue) : scheme.outline;
+    final ownership = this.ownership;
 
     return InkWell(
       onTap: onTap,
@@ -82,6 +91,15 @@ class _SquareTile extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             Container(height: 6, color: bandColor),
+            // Ownership strip: the owner's avatar color, or a warning tone
+            // once mortgaged — same color language as the players row.
+            if (ownership != null)
+              Container(
+                height: 4,
+                color: ownership.mortgaged
+                    ? AppColors.expense.withValues(alpha: 0.6)
+                    : AppColors.avatarColor(ownership.ownerId),
+              ),
             Expanded(
               child: Padding(
                 padding:
@@ -106,6 +124,27 @@ class _SquareTile extends StatelessWidget {
                         ),
                       ),
                     ),
+                    if (ownership != null && ownership.houses > 0) ...[
+                      const SizedBox(height: 2),
+                      if (ownership.houses >= PropertyOwnership.hotel)
+                        const Icon(
+                          Icons.apartment_rounded,
+                          size: 12,
+                          color: AppColors.expense,
+                        )
+                      else
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            for (var i = 0; i < ownership.houses; i++)
+                              const Icon(
+                                Icons.home_rounded,
+                                size: 9,
+                                color: AppColors.income,
+                              ),
+                          ],
+                        ),
+                    ],
                     if (tokens.isNotEmpty) ...[
                       const SizedBox(height: 3),
                       Wrap(
