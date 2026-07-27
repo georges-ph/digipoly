@@ -1021,20 +1021,38 @@ class GameServer {
   }
 
   /// Draws a random card from the board's deck, shows it to the whole
-  /// table and applies its money effect as a bank transaction. Called both
-  /// for a manual Chance/Chest quick action and for auto-landing on one.
+  /// table and applies its effect — either a bank transaction or, for a
+  /// "go to X" card, moving the drawer's token and resolving whatever's
+  /// there (same as landing on it normally). Called both for a manual
+  /// Chance/Chest quick action and for auto-landing on one.
   void _drawCardFor(String playerId, String deck) {
     final game = _game!;
-    final cards = deck == 'chest'
-        ? game.board.communityChestCards
-        : game.board.chanceCards;
+    final board = game.board;
+    final cards =
+        deck == 'chest' ? board.communityChestCards : board.chanceCards;
     if (cards.isEmpty) return;
     final card = cards[_random.nextInt(cards.length)];
+
+    // Move first so the broadcast below already carries the new position.
+    // Only meaningful on a board with a curated layout — elsewhere there is
+    // no position to move, so the card is shown with no further effect.
+    final moveTarget = card.moveToPropertyId;
+    if (moveTarget != null && board.goIndex >= 0) {
+      final targetIndex =
+          board.properties.indexWhere((p) => p.id == moveTarget);
+      final mover = _players[playerId];
+      if (targetIndex >= 0 && mover != null && !mover.inJail) {
+        final total =
+            (targetIndex - mover.position) % board.properties.length;
+        _movePlayer(mover, total);
+      }
+    }
 
     _broadcast(WsMessage(MessageType.cardDrawn, {
       'playerId': playerId,
       'deck': deck,
       'card': card.toJson(),
+      'players': _players.values.map((p) => p.toJson()).toList(),
     }));
 
     if (card.amount == 0) return;

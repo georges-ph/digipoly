@@ -3,23 +3,55 @@ import 'property.dart';
 /// A Chance / Community Chest style card. [amount] is the money movement
 /// relative to the bank: positive means the player receives, negative means
 /// the player pays. Zero means the card has no direct money effect.
+///
+/// [moveToPropertyId] is the other kind of effect a card can have: "Advance
+/// to X" — the drawer's token jumps straight to that square (paying GO
+/// salary if it's passed/landed on along the way) and whatever's there is
+/// then resolved exactly like landing on it normally would. A card is either
+/// a money card or a move card, never both — the board editor enforces
+/// that. Only meaningful on boards with a curated layout; elsewhere there is
+/// no position to move, so the card is shown but has no effect.
 class BoardCard {
-  const BoardCard({required this.id, required this.text, this.amount = 0});
+  const BoardCard({
+    required this.id,
+    required this.text,
+    this.amount = 0,
+    this.moveToPropertyId,
+  });
 
   final String id;
   final String text;
   final int amount;
+  final String? moveToPropertyId;
 
-  Map<String, dynamic> toJson() => {'id': id, 'text': text, 'amount': amount};
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'text': text,
+        'amount': amount,
+        if (moveToPropertyId != null) 'moveToPropertyId': moveToPropertyId,
+      };
 
   factory BoardCard.fromJson(Map<String, dynamic> json) => BoardCard(
         id: json['id'] as String,
         text: json['text'] as String? ?? '',
         amount: json['amount'] as int? ?? 0,
+        moveToPropertyId: json['moveToPropertyId'] as String?,
       );
 
-  BoardCard copyWith({String? text, int? amount}) =>
-      BoardCard(id: id, text: text ?? this.text, amount: amount ?? this.amount);
+  BoardCard copyWith({
+    String? text,
+    int? amount,
+    String? moveToPropertyId,
+    bool clearMoveTarget = false,
+  }) =>
+      BoardCard(
+        id: id,
+        text: text ?? this.text,
+        amount: amount ?? this.amount,
+        moveToPropertyId: clearMoveTarget
+            ? null
+            : (moveToPropertyId ?? this.moveToPropertyId),
+      );
 }
 
 /// The full definition of a physical board: currency, money rules,

@@ -107,7 +107,7 @@ class _BoardEditorScreenState extends State<BoardEditorScreen> {
     final result = await showModalBottomSheet<(BoardCard?, bool)>(
       context: context,
       isScrollControlled: true,
-      builder: (_) => _CardSheet(initial: existing),
+      builder: (_) => _CardSheet(initial: existing, properties: _properties),
     );
     if (result == null) return;
 
@@ -339,6 +339,7 @@ class _BoardEditorScreenState extends State<BoardEditorScreen> {
                 _CardList(
                   cards: _chanceCards,
                   symbol: symbol,
+                  properties: _properties,
                   onTap: (card) => _editCard(_chanceCards, card),
                 ),
                 const SizedBox(height: 16),
@@ -353,6 +354,7 @@ class _BoardEditorScreenState extends State<BoardEditorScreen> {
                 _CardList(
                   cards: _communityCards,
                   symbol: symbol,
+                  properties: _properties,
                   onTap: (card) => _editCard(_communityCards, card),
                 ),
               ]),
@@ -537,11 +539,13 @@ class _CardList extends StatelessWidget {
   const _CardList({
     required this.cards,
     required this.symbol,
+    required this.properties,
     required this.onTap,
   });
 
   final List<BoardCard> cards;
   final String symbol;
+  final List<Property> properties;
   final void Function(BoardCard card) onTap;
 
   @override
@@ -554,6 +558,15 @@ class _CardList extends StatelessWidget {
         'No cards yet.',
         style: textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
       );
+    }
+
+    String? moveTargetName(BoardCard card) {
+      final targetId = card.moveToPropertyId;
+      if (targetId == null) return null;
+      for (final property in properties) {
+        if (property.id == targetId) return property.name;
+      }
+      return 'a removed square';
     }
 
     return Column(
@@ -572,6 +585,13 @@ class _CardList extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
               style: textTheme.bodyMedium,
             ),
+            subtitle: moveTargetName(card) == null
+                ? null
+                : Text(
+                    'Moves to ${moveTargetName(card)}',
+                    style: textTheme.bodySmall
+                        ?.copyWith(color: scheme.onSurfaceVariant),
+                  ),
             trailing: card.amount == 0
                 ? null
                 : Text(
@@ -899,10 +919,15 @@ class _PropertySheetState extends State<_PropertySheet> {
 // Card editing sheet
 // ---------------------------------------------------------------------------
 
+enum _CardEffect { money, move }
+
 class _CardSheet extends StatefulWidget {
-  const _CardSheet({this.initial});
+  const _CardSheet({this.initial, required this.properties});
 
   final BoardCard? initial;
+
+  /// Board squares a "move to" card can target.
+  final List<Property> properties;
 
   @override
   State<_CardSheet> createState() => _CardSheetState();
@@ -917,6 +942,10 @@ class _CardSheetState extends State<_CardSheet> {
         : '${widget.initial!.amount.abs()}',
   );
   late bool _playerReceives = (widget.initial?.amount ?? 0) >= 0;
+  late _CardEffect _effect = widget.initial?.moveToPropertyId != null
+      ? _CardEffect.move
+      : _CardEffect.money;
+  late String? _moveTargetId = widget.initial?.moveToPropertyId;
 
   @override
   void dispose() {
@@ -928,6 +957,20 @@ class _CardSheetState extends State<_CardSheet> {
   void _save() {
     final text = _textController.text.trim();
     if (text.isEmpty) return;
+
+    if (_effect == _CardEffect.move) {
+      final targetId = _moveTargetId;
+      if (targetId == null) return;
+      Navigator.of(context).pop((
+        BoardCard(
+          id: widget.initial?.id ?? const Uuid().v4(),
+          text: text,
+          moveToPropertyId: targetId,
+        ),
+        false,
+      ));
+      return;
+    }
 
     final amount = int.tryParse(_amountController.text.trim()) ?? 0;
     final card = BoardCard(
@@ -983,31 +1026,65 @@ class _CardSheetState extends State<_CardSheet> {
             ),
           ),
           const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: SegmentedButton<bool>(
-                  segments: const [
-                    ButtonSegment(value: true, label: Text('Receives')),
-                    ButtonSegment(value: false, label: Text('Pays')),
-                  ],
-                  selected: {_playerReceives},
-                  onSelectionChanged: (selection) =>
-                      setState(() => _playerReceives = selection.first),
-                ),
-              ),
-              const SizedBox(width: 12),
-              SizedBox(
-                width: 110,
-                child: TextField(
-                  controller: _amountController,
-                  keyboardType: TextInputType.number,
-                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                  decoration: const InputDecoration(labelText: 'Amount'),
-                ),
+          SegmentedButton<_CardEffect>(
+            segments: const [
+              ButtonSegment(value: _CardEffect.money, label: Text('Money')),
+              ButtonSegment(
+                value: _CardEffect.move,
+                label: Text('Move to property'),
               ),
             ],
+            selected: {_effect},
+            onSelectionChanged: (selection) =>
+                setState(() => _effect = selection.first),
           ),
+          const SizedBox(height: 12),
+          if (_effect == _CardEffect.money)
+            Row(
+              children: [
+                Expanded(
+                  child: SegmentedButton<bool>(
+                    segments: const [
+                      ButtonSegment(value: true, label: Text('Receives')),
+                      ButtonSegment(value: false, label: Text('Pays')),
+                    ],
+                    selected: {_playerReceives},
+                    onSelectionChanged: (selection) =>
+                        setState(() => _playerReceives = selection.first),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                SizedBox(
+                  width: 110,
+                  child: TextField(
+                    controller: _amountController,
+                    keyboardType: TextInputType.number,
+                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                    decoration: const InputDecoration(labelText: 'Amount'),
+                  ),
+                ),
+              ],
+            )
+          else if (widget.properties.isEmpty)
+            Text(
+              'Add some properties to the board first.',
+              style: textTheme.bodySmall,
+            )
+          else
+            DropdownButtonFormField<String>(
+              initialValue: widget.properties.any((p) => p.id == _moveTargetId)
+                  ? _moveTargetId
+                  : null,
+              decoration: const InputDecoration(labelText: 'Destination'),
+              items: [
+                for (final property in widget.properties)
+                  DropdownMenuItem(
+                    value: property.id,
+                    child: Text(property.name),
+                  ),
+              ],
+              onChanged: (value) => setState(() => _moveTargetId = value),
+            ),
           const SizedBox(height: 20),
           FilledButton(onPressed: _save, child: const Text('Save card')),
         ],

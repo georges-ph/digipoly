@@ -734,6 +734,19 @@ class GameProvider extends ChangeNotifier {
       case MessageType.cardDrawn:
         final cardJson = message.payload['card'] as Map<String, dynamic>?;
         final drawerId = message.payload['playerId'] as String?;
+        // A "go to X" card moves the drawer's token — the broadcast carries
+        // the resulting player list so every device's board stays in sync,
+        // same as a dice roll.
+        final playersJson = message.payload['players'] as List<dynamic>?;
+        if (playersJson != null) {
+          _players = playersJson
+              .map((e) => Player.fromJson(e as Map<String, dynamic>))
+              .toList();
+          final record = _record;
+          if (record != null && !isHost) {
+            _db.upsertPlayers(record.game.id, _players);
+          }
+        }
         if (cardJson != null && drawerId != null) {
           _cardDraws.add((
             playerId: drawerId,
@@ -741,6 +754,7 @@ class GameProvider extends ChangeNotifier {
             card: BoardCard.fromJson(cardJson),
           ));
         }
+        notifyListeners();
       case MessageType.diceRolled:
         final json = message.payload['roll'] as Map<String, dynamic>?;
         if (json != null) {
