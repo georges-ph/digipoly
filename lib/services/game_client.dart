@@ -185,6 +185,23 @@ class GameClient {
     return txId;
   }
 
+  /// Starts a live auction for an unowned property. Not turn-gated —
+  /// auctions arise on other players' turns, same as the old bid-after-the-
+  /// fact flow.
+  void sendStartAuction(String propertyId) =>
+      send(WsMessage(MessageType.startAuction, {'propertyId': propertyId}));
+
+  void sendPlaceBid(String propertyId, int amount) =>
+      send(WsMessage(MessageType.placeBid, {
+        'propertyId': propertyId,
+        'amount': amount,
+      }));
+
+  /// Anyone can close a running auction — sells to the top bidder, or
+  /// cancels if nobody bid.
+  void sendCloseAuction(String propertyId) =>
+      send(WsMessage(MessageType.closeAuction, {'propertyId': propertyId}));
+
   void sendEndTurn() => send(const WsMessage(MessageType.endTurn));
 
   void sendLeave() => send(const WsMessage(MessageType.leaveGame));

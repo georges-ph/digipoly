@@ -2,6 +2,7 @@ import 'board.dart';
 import 'dice_roll.dart';
 import 'game_transaction.dart';
 import 'player.dart';
+import 'property_auction.dart';
 import 'property_ownership.dart';
 
 /// The shared, wire-format part of a game: what every device agrees on.
@@ -99,6 +100,7 @@ class GameSnapshot {
     this.lastRoll,
     this.turnRolled = false,
     this.freeParkingPot = 0,
+    this.auctions = const [],
   });
 
   final Game game;
@@ -116,6 +118,9 @@ class GameSnapshot {
   /// Accumulated Free Parking pot (fed by tax/jail-fine payments).
   final int freeParkingPot;
 
+  /// Auctions currently running at the table, if any.
+  final List<PropertyAuction> auctions;
+
   Map<String, dynamic> toJson() => {
         'game': game.toJson(),
         'players': players.map((p) => p.toJson()).toList(),
@@ -125,6 +130,7 @@ class GameSnapshot {
         if (lastRoll != null) 'lastRoll': lastRoll!.toJson(),
         'turnRolled': turnRolled,
         'freeParkingPot': freeParkingPot,
+        'auctions': auctions.map((a) => a.toJson()).toList(),
       };
 
   factory GameSnapshot.fromJson(Map<String, dynamic> json) => GameSnapshot(
@@ -144,5 +150,8 @@ class GameSnapshot {
             : DiceRoll.fromJson(json['lastRoll'] as Map<String, dynamic>),
         turnRolled: json['turnRolled'] as bool? ?? false,
         freeParkingPot: json['freeParkingPot'] as int? ?? 0,
+        auctions: (json['auctions'] as List<dynamic>? ?? const [])
+            .map((e) => PropertyAuction.fromJson(e as Map<String, dynamic>))
+            .toList(),
       );
 }

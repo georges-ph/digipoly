@@ -7,6 +7,7 @@ import '../services/game_client.dart';
 import '../theme/app_theme.dart';
 import '../utils/formatting.dart';
 import '../widgets/activity_feed.dart';
+import '../widgets/auction_card.dart';
 import '../widgets/board_layout_view.dart';
 import '../widgets/player_avatar.dart';
 import 'properties_screen.dart';
@@ -84,6 +85,11 @@ class DashboardScreen extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 16),
+          ],
+          if (session.auctions.isNotEmpty) ...[
+            for (final auction in session.auctions.values)
+              AuctionCard(auction: auction),
+            const SizedBox(height: 4),
           ],
           Wrap(
             spacing: 12,

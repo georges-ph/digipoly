@@ -12,6 +12,7 @@ import '../models/game_transaction.dart';
 import '../models/money_request.dart';
 import '../models/player.dart';
 import '../models/property.dart';
+import '../models/property_auction.dart';
 import '../models/property_ownership.dart';
 import '../models/result.dart';
 import '../models/ws_message.dart';
@@ -51,6 +52,7 @@ class GameProvider extends ChangeNotifier {
   List<Player> _players = [];
   List<GameTransaction> _transactions = [];
   final Map<String, PropertyOwnership> _ownerships = {};
+  final Map<String, PropertyAuction> _auctions = {};
   String? _currentTurnId;
   DiceRoll? _lastRoll;
   bool _turnRolled = false;
@@ -145,6 +147,11 @@ class GameProvider extends ChangeNotifier {
 
   PropertyOwnership? ownershipOf(String propertyId) =>
       _ownerships[propertyId];
+
+  /// Auctions currently running at the table, keyed by property id.
+  Map<String, PropertyAuction> get auctions => Map.unmodifiable(_auctions);
+
+  PropertyAuction? auctionFor(String propertyId) => _auctions[propertyId];
 
   Property? propertyById(String propertyId) {
     final board = game?.board;
@@ -449,6 +456,7 @@ class GameProvider extends ChangeNotifier {
     _players = [];
     _transactions = [];
     _ownerships.clear();
+    _auctions.clear();
     _currentTurnId = null;
     _lastRoll = null;
     _turnRolled = false;
@@ -538,6 +546,32 @@ class GameProvider extends ChangeNotifier {
     final offline = _requireConnection();
     if (offline != null) return Future.value(offline);
     return _awaitVerdict(_client!.sendBuyProperty(propertyId, price: price));
+  }
+
+  /// Starts a live, table-held auction for an unowned property. Anyone can
+  /// start one and everyone connected sees the bidding live — not gated to
+  /// your turn, since auctions arise on other players' turns.
+  void startAuction(String propertyId) {
+    if (_connection == ClientStatus.connected) {
+      _client?.sendStartAuction(propertyId);
+    }
+  }
+
+  /// Raises the bid on a running auction. No turn order — anyone can raise
+  /// anytime, as long as it beats the current bid.
+  void placeBid(String propertyId, int amount) {
+    if (_connection == ClientStatus.connected) {
+      _client?.sendPlaceBid(propertyId, amount);
+    }
+  }
+
+  /// Closes a running auction — anyone can, not just whoever started it.
+  /// Sells to the current top bidder at their bid, or cancels if nobody
+  /// bid.
+  void closeAuction(String propertyId) {
+    if (_connection == ClientStatus.connected) {
+      _client?.sendCloseAuction(propertyId);
+    }
   }
 
   /// Pays whatever rent the server computes for [propertyId].
@@ -845,6 +879,26 @@ class GameProvider extends ChangeNotifier {
       case MessageType.gameClosed:
         _hostEnded = true;
         notifyListeners();
+      case MessageType.auctionStarted:
+      case MessageType.auctionBid:
+        final json = message.payload['auction'] as Map<String, dynamic>?;
+        if (json != null) {
+          final auction = PropertyAuction.fromJson(json);
+          _auctions[auction.propertyId] = auction;
+          notifyListeners();
+        }
+      case MessageType.auctionClosed:
+        final propertyId = message.payload['propertyId'] as String?;
+        if (propertyId != null) _auctions.remove(propertyId);
+        final reason = message.payload['reason'] as String?;
+        if (message.payload['cancelled'] == true && reason != null) {
+          _errors.add(reason);
+        }
+        notifyListeners();
+      case MessageType.auctionRejected:
+        final reason =
+            message.payload['reason'] as String? ?? 'That bid was rejected.';
+        _errors.add(reason);
       default:
         break;
     }
@@ -882,6 +936,11 @@ class GameProvider extends ChangeNotifier {
       ..clear()
       ..addEntries(
         snapshot.ownerships.map((o) => MapEntry(o.propertyId, o)),
+      );
+    _auctions
+      ..clear()
+      ..addEntries(
+        snapshot.auctions.map((a) => MapEntry(a.propertyId, a)),
       );
     _currentTurnId = snapshot.currentTurnId;
     _lastRoll = snapshot.lastRoll;

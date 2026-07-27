@@ -15,6 +15,7 @@ import '../models/game_transaction.dart';
 import '../models/money_request.dart';
 import '../models/player.dart';
 import '../models/property.dart';
+import '../models/property_auction.dart';
 import '../models/property_ownership.dart';
 import '../models/result.dart';
 import '../models/ws_message.dart';
@@ -44,6 +45,7 @@ class GameServer {
   final List<GameTransaction> _transactions = [];
   final Map<String, PropertyOwnership> _ownerships = {};
   final Map<String, MoneyRequest> _pendingRequests = {};
+  final Map<String, PropertyAuction> _auctions = {};
   String? _currentTurnId;
   DiceRoll? _lastRoll;
   bool _turnRolled = false;
@@ -90,6 +92,7 @@ class GameServer {
       ..clear()
       ..addEntries(ownerships.map((o) => MapEntry(o.propertyId, o)));
     _pendingRequests.clear();
+    _auctions.clear();
     _spectators.clear();
     // Roll state is restored from the DB so restarting the host app
     // mid-turn doesn't hand the current player a fresh roll.
@@ -239,6 +242,12 @@ class GameServer {
             _handleEditTransactionNote(playerId, channel, message.payload);
           case MessageType.payJailFine:
             _handlePayJailFine(playerId, channel, message.payload);
+          case MessageType.startAuction:
+            _handleStartAuction(playerId, message.payload);
+          case MessageType.placeBid:
+            _handlePlaceBid(playerId, message.payload);
+          case MessageType.closeAuction:
+            _handleCloseAuction(playerId, message.payload);
           case MessageType.endTurn:
             _handleEndTurn(playerId, channel);
           case MessageType.leaveGame:
@@ -548,6 +557,157 @@ class GameServer {
     _db.upsertOwnerships(_game!.id, [ownership]);
     _broadcast(WsMessage(MessageType.propertyChanged, {
       'ownership': ownership.toJson(),
+    }));
+  }
+
+  // ------------------------------------------------------------- Auctions
+
+  Property? _findProperty(String propertyId) {
+    for (final property in _game!.board.properties) {
+      if (property.id == propertyId) return property;
+    }
+    return null;
+  }
+
+  void _rejectAuction(String senderId, String propertyId, String reason) =>
+      _sendTo(senderId, WsMessage(MessageType.auctionRejected, {
+        'propertyId': propertyId,
+        'reason': reason,
+      }));
+
+  /// Starts a live auction for an unowned property — not turn-gated, since
+  /// auctions arise on other players' turns (someone else declined to buy).
+  /// Anyone can start one and everyone watching sees it live.
+  void _handleStartAuction(String senderId, Map<String, dynamic> payload) {
+    final sender = _players[senderId];
+    if (sender == null || sender.hasLeft) return;
+
+    final propertyId = payload['propertyId'] as String? ?? '';
+    final property = _findProperty(propertyId);
+    if (property == null || !property.kind.isOwnable) {
+      _rejectAuction(senderId, propertyId, "This square can't be auctioned.");
+      return;
+    }
+    if (_ownerships.containsKey(propertyId)) {
+      _rejectAuction(senderId, propertyId, '${property.name} is already owned.');
+      return;
+    }
+    if (_auctions.containsKey(propertyId)) {
+      _rejectAuction(
+        senderId,
+        propertyId,
+        'An auction for ${property.name} is already running.',
+      );
+      return;
+    }
+
+    final auction = PropertyAuction(propertyId: propertyId, startedBy: senderId);
+    _auctions[propertyId] = auction;
+    _broadcast(WsMessage(MessageType.auctionStarted, {
+      'auction': auction.toJson(),
+    }));
+  }
+
+  /// Raises the bid on a running auction. No turn order — anyone can raise
+  /// anytime, as long as it beats the current bid and they can afford it.
+  void _handlePlaceBid(String senderId, Map<String, dynamic> payload) {
+    final sender = _players[senderId];
+    if (sender == null || sender.hasLeft) return;
+
+    final propertyId = payload['propertyId'] as String? ?? '';
+    final auction = _auctions[propertyId];
+    if (auction == null) {
+      _rejectAuction(senderId, propertyId, 'That auction is no longer running.');
+      return;
+    }
+    final amount = payload['amount'] as int? ?? 0;
+    if (amount <= auction.currentBid) {
+      _rejectAuction(
+        senderId,
+        propertyId,
+        'Bid higher than the current bid.',
+      );
+      return;
+    }
+    if (sender.balance < amount) {
+      _rejectAuction(senderId, propertyId, "You don't have that much.");
+      return;
+    }
+
+    final updated =
+        auction.copyWith(currentBid: amount, currentBidderId: senderId);
+    _auctions[propertyId] = updated;
+    _broadcast(WsMessage(MessageType.auctionBid, {
+      'auction': updated.toJson(),
+    }));
+  }
+
+  /// Closes a running auction — anyone can, not just the one who started
+  /// it. Sells to the current top bidder at their bid, or cancels if
+  /// nobody bid (or the bid can no longer be honored).
+  void _handleCloseAuction(String senderId, Map<String, dynamic> payload) {
+    final sender = _players[senderId];
+    if (sender == null || sender.hasLeft) return;
+
+    final propertyId = payload['propertyId'] as String? ?? '';
+    final auction = _auctions.remove(propertyId);
+    if (auction == null) return;
+
+    final bidderId = auction.currentBidderId;
+    final bidder = bidderId == null ? null : _players[bidderId];
+    if (bidderId == null || bidder == null || bidder.hasLeft) {
+      _broadcast(WsMessage(MessageType.auctionClosed, {
+        'propertyId': propertyId,
+        'cancelled': true,
+      }));
+      return;
+    }
+
+    final validated = GameEngine.validatePurchase(
+      board: _game!.board,
+      ownerships: _ownerships,
+      propertyId: propertyId,
+      buyer: bidder,
+      price: auction.currentBid,
+    );
+    if (!validated.isOk) {
+      _broadcast(WsMessage(MessageType.auctionClosed, {
+        'propertyId': propertyId,
+        'cancelled': true,
+        'reason': validated.error,
+      }));
+      return;
+    }
+
+    final tx = GameTransaction(
+      id: const Uuid().v4(),
+      gameId: _game!.id,
+      fromId: bidderId,
+      toId: Player.bankId,
+      amount: auction.currentBid,
+      type: TransactionType.purchase,
+      propertyId: propertyId,
+      timestamp: DateTime.now(),
+      note: 'Auction',
+    );
+    if (!_applyTransaction(tx, (_) {})) {
+      _broadcast(WsMessage(MessageType.auctionClosed, {
+        'propertyId': propertyId,
+        'cancelled': true,
+      }));
+      return;
+    }
+
+    final ownership = PropertyOwnership(propertyId: propertyId, ownerId: bidderId);
+    _ownerships[propertyId] = ownership;
+    _db.upsertOwnerships(_game!.id, [ownership]);
+    _broadcast(WsMessage(MessageType.propertyChanged, {
+      'ownership': ownership.toJson(),
+    }));
+    _broadcast(WsMessage(MessageType.auctionClosed, {
+      'propertyId': propertyId,
+      'winnerId': bidderId,
+      'amount': auction.currentBid,
     }));
   }
 
@@ -1187,6 +1347,7 @@ class GameServer {
         lastRoll: _lastRoll,
         turnRolled: _turnRolled,
         freeParkingPot: _freeParkingPot,
+        auctions: _auctions.values.toList(),
       );
 
   void _send(WebSocketChannel channel, WsMessage message) =>

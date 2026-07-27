@@ -24,6 +24,9 @@ enum MessageType {
   leaveGame,
   editTransactionNote,
   payJailFine,
+  startAuction,
+  placeBid,
+  closeAuction,
 
   // Server -> client events.
   joinAccepted,
@@ -42,6 +45,10 @@ enum MessageType {
   playerLeft,
   presenceChanged,
   gameClosed,
+  auctionStarted,
+  auctionBid,
+  auctionClosed,
+  auctionRejected,
   unknown;
 
   static MessageType fromName(String name) => MessageType.values.firstWhere(

@@ -20,6 +20,7 @@ import '../theme/app_theme.dart';
 import '../utils/formatting.dart';
 import '../utils/snack.dart';
 import '../widgets/activity_feed.dart';
+import '../widgets/auction_card.dart';
 import '../widgets/balance_card.dart';
 import '../widgets/board_layout_view.dart';
 import '../widgets/player_avatar.dart';
@@ -720,6 +721,14 @@ class _GameScreenState extends State<GameScreen> {
                     highlight: session.isMyTurn,
                   ),
           ),
+          // Auctions aren't turn-gated — anyone can be bidding at any time,
+          // so they're visible to the whole table regardless of whose turn
+          // it is.
+          if (session.auctions.isNotEmpty) ...[
+            const SizedBox(height: 14),
+            for (final auction in session.auctions.values)
+              AuctionCard(auction: auction),
+          ],
           // A turn is roll → act → end; the controls only show up when
           // it's actually this player's move.
           if (session.isMyTurn) ...[

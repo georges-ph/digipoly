@@ -12,6 +12,7 @@ import '../services/nfc_service.dart';
 import '../theme/app_theme.dart';
 import '../utils/formatting.dart';
 import '../utils/snack.dart';
+import '../widgets/auction_card.dart';
 import '../widgets/player_avatar.dart';
 import 'send_money_screen.dart';
 
@@ -569,64 +570,11 @@ class _PropertySheetState extends State<_PropertySheet> {
     );
   }
 
-  /// Settle a table-held auction: the winner types their bid and buys the
-  /// property at that price. Not turn-gated — auctions are triggered by
-  /// someone else declining to buy on *their* turn.
-  Future<void> _auctionBuyFlow() async {
-    final session = context.read<GameProvider>();
-    final board = session.game?.board;
-    final property = session.propertyById(widget.propertyId);
-    if (board == null || property == null) return;
-    final currency = board.currencySymbol;
-
-    final controller = TextEditingController();
-    final bid = await showDialog<int>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: Text('Buy ${property.name} at auction'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          keyboardType: TextInputType.number,
-          decoration: InputDecoration(
-            labelText: 'Winning bid',
-            prefixText: '$currency ',
-          ),
-          onSubmitted: (value) =>
-              Navigator.pop(dialogContext, int.tryParse(value.trim())),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(
-              dialogContext,
-              int.tryParse(controller.text.trim()),
-            ),
-            child: const Text('Buy'),
-          ),
-        ],
-      ),
-    );
-    if (!mounted || bid == null) return;
-    if (bid <= 0) {
-      setState(() => _error = 'Enter the winning bid amount.');
-      return;
-    }
-    if (!await _confirm(
-      'Buy ${property.name}?',
-      '${formatMoney(bid, currency)} — your winning bid — will be paid '
-          'to the bank.',
-    )) {
-      return;
-    }
-    await _run(
-      () => session.buyProperty(property.id, price: bid),
-      success: 'You bought ${property.name} at auction',
-      resolved: true,
-    );
+  /// Starts a live, table-held auction for this unowned property — not
+  /// turn-gated, since auctions arise on other players' turns (someone
+  /// else declined to buy on *their* turn).
+  void _startAuction() {
+    context.read<GameProvider>().startAuction(widget.propertyId);
   }
 
   /// Trade: pick another player and hand them this property. The deal's
@@ -869,38 +817,42 @@ class _PropertySheetState extends State<_PropertySheet> {
             _RentTable(property: property, currency: currency),
             const SizedBox(height: 20),
             if (owner == null) ...[
-              FilledButton.icon(
-                onPressed: canResolve && !_busy && onThisSquare
-                    ? _buyFlow
-                    : null,
-                icon: const Icon(Icons.shopping_bag_outlined),
-                label: Text(
-                  'Buy for ${formatMoney(property.price, currency)}',
+              if (session.auctionFor(property.id) case final auction?)
+                AuctionCard(auction: auction)
+              else ...[
+                FilledButton.icon(
+                  onPressed: canResolve && !_busy && onThisSquare
+                      ? _buyFlow
+                      : null,
+                  icon: const Icon(Icons.shopping_bag_outlined),
+                  label: Text(
+                    'Buy for ${formatMoney(property.price, currency)}',
+                  ),
                 ),
-              ),
-              if (canResolve && !onThisSquare) ...[
-                const SizedBox(height: 6),
+                if (canResolve && !onThisSquare) ...[
+                  const SizedBox(height: 6),
+                  Center(
+                    child: Text(
+                      "You're not standing here — land on it to buy at "
+                      'list price.',
+                      textAlign: TextAlign.center,
+                      style: textTheme.bodySmall
+                          ?.copyWith(color: scheme.onSurfaceVariant),
+                    ),
+                  ),
+                ],
+                // Auctions happen out loud at the table — the winner
+                // needn't be standing here, so anyone can start one.
                 Center(
-                  child: Text(
-                    "You're not standing here — land on it to buy at "
-                    'list price.',
-                    textAlign: TextAlign.center,
-                    style: textTheme.bodySmall
-                        ?.copyWith(color: scheme.onSurfaceVariant),
+                  child: TextButton(
+                    onPressed: session.connection == ClientStatus.connected &&
+                            !_busy
+                        ? _startAuction
+                        : null,
+                    child: const Text('Start an auction'),
                   ),
                 ),
               ],
-              // Auctions happen out loud at the table — the winner needn't
-              // be standing here, so this settles on anyone's turn.
-              Center(
-                child: TextButton(
-                  onPressed: session.connection == ClientStatus.connected &&
-                          !_busy
-                      ? _auctionBuyFlow
-                      : null,
-                  child: const Text('Won an auction? Buy at your bid'),
-                ),
-              ),
             ]
             else if (!isMine && (ownership?.mortgaged ?? false))
               Container(
