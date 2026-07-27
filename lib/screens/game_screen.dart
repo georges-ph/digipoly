@@ -63,14 +63,27 @@ class _GameScreenState extends State<GameScreen> {
       _snack(message);
     });
     _cardDrawSub = session.cardDraws.listen((event) {
-      if (mounted) _showCardDialog(event);
+      if (!mounted) return;
+      _showCardDialog(event).then((_) {
+        // A "go to X" card moved me — offer the same landing actions as a
+        // normal roll once the reveal dialog is out of the way.
+        if (mounted && event.playerId == _session?.myPlayerId) {
+          _maybeOpenLandedProperty();
+        }
+      });
     });
     // Every roll (anyone's) pops the board up so token movement is visible
     // wherever a player is looking — only on boards with a curated layout,
     // and only if it isn't already open.
-    _diceRollSub = session.diceRolls.listen((_) {
-      if (!mounted || _boardSheetController != null) return;
-      if ((_session?.game?.board.goIndex ?? -1) >= 0) _toggleBoardSheet();
+    _diceRollSub = session.diceRolls.listen((roll) {
+      if (!mounted) return;
+      if (_boardSheetController == null &&
+          (_session?.game?.board.goIndex ?? -1) >= 0) {
+        _toggleBoardSheet();
+      }
+      // Only my own roll moves my own token — offer to buy/pay rent/build
+      // right away instead of making the player dig through Properties.
+      if (roll.playerId == _session?.myPlayerId) _maybeOpenLandedProperty();
     });
     // Money requests pop as a dialog wherever the player currently is.
     session.addListener(_maybeShowRequestDialog);
@@ -127,7 +140,7 @@ class _GameScreenState extends State<GameScreen> {
   }
 
   /// A card drawn at the table, revealed on every device.
-  void _showCardDialog(CardDrawEvent event) {
+  Future<void> _showCardDialog(CardDrawEvent event) {
     final session = context.read<GameProvider>();
     final board = session.game?.board;
     final who = event.playerId == session.myPlayerId
@@ -136,7 +149,7 @@ class _GameScreenState extends State<GameScreen> {
     final deckName =
         event.deck == 'chest' ? 'Community Chest' : 'Chance';
 
-    showDialog<void>(
+    return showDialog<void>(
       context: context,
       builder: (dialogContext) {
         final textTheme = Theme.of(dialogContext).textTheme;
@@ -208,6 +221,25 @@ class _GameScreenState extends State<GameScreen> {
         builder: (_) => PropertiesScreen(openPropertyId: propertyId),
       ),
     );
+  }
+
+  /// After my own token moves (a roll, or a "go to X" card), pop the
+  /// property sheet straight open if I landed on an ownable square — buy,
+  /// pay rent or manage buildings without digging through Properties.
+  void _maybeOpenLandedProperty() {
+    if (!mounted) return;
+    final session = _session;
+    final board = session?.game?.board;
+    final position = session?.me?.position;
+    if (session == null || board == null || board.goIndex < 0) return;
+    if (position == null ||
+        position < 0 ||
+        position >= board.properties.length) {
+      return;
+    }
+    final square = board.properties[position];
+    if (!square.kind.isOwnable) return;
+    _openProperties(propertyId: square.id);
   }
 
   /// Any Digipoly card touching the phone lands here from the always-on
