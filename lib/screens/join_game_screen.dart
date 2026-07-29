@@ -9,17 +9,12 @@ import '../services/game_server.dart';
 import '../theme/app_theme.dart';
 import '../utils/snack.dart';
 import '../widgets/section_header.dart';
-import 'dashboard_screen.dart';
 import 'game_screen.dart';
 
 /// Rooms discovered on the local network via mDNS, plus a manual
 /// address fallback for networks that block multicast.
 class JoinGameScreen extends StatefulWidget {
-  const JoinGameScreen({super.key, this.spectator = false});
-
-  /// Watch the dashboard read-only instead of joining as a player — no
-  /// seat, no name needed, nothing saved to this device's games list.
-  final bool spectator;
+  const JoinGameScreen({super.key});
 
   @override
   State<JoinGameScreen> createState() => _JoinGameScreenState();
@@ -44,23 +39,40 @@ class _JoinGameScreenState extends State<JoinGameScreen> {
     super.dispose();
   }
 
-  Future<void> _join(String host, int port, String key) async {
+  Future<void> _join(String host, int port, String key, {String? gameId}) async {
     if (_joiningKey != null) return;
     final session = context.read<GameProvider>();
+
+    // Already hosting/connected to this exact room on this device (e.g.
+    // tapping your own room in the discovered list) — reconnecting would
+    // tear down and kill the very session we're trying to reach. Reuse it.
+    if (gameId != null &&
+        gameId.isNotEmpty &&
+        gameId == session.record?.game.id &&
+        session.hasActiveSession) {
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (_) => const GameScreen()),
+      );
+      return;
+    }
+
     setState(() => _joiningKey = key);
 
-    final result = widget.spectator
-        ? await session.watchRoom(host: host, port: port)
-        : await session.joinRoom(host: host, port: port);
+    Result<void> result;
+    try {
+      result = await session.joinRoom(host: host, port: port);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _joiningKey = null);
+      showSnack(context, 'Could not reach the host: $e');
+      return;
+    }
     if (!mounted) return;
     setState(() => _joiningKey = null);
 
     if (result.isOk) {
       Navigator.of(context).pushReplacement(
-        MaterialPageRoute(
-          builder: (_) =>
-              widget.spectator ? const DashboardScreen() : const GameScreen(),
-        ),
+        MaterialPageRoute(builder: (_) => const GameScreen()),
       );
     } else {
       showSnack(context, result.error!);
@@ -104,7 +116,7 @@ class _JoinGameScreenState extends State<JoinGameScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(widget.spectator ? 'Watch a game' : 'Join a game'),
+        title: const Text('Join a game'),
       ),
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -271,8 +283,12 @@ class _JoinGameScreenState extends State<JoinGameScreen> {
                                     CircularProgressIndicator(strokeWidth: 2),
                               )
                             : const Icon(Icons.chevron_right_rounded),
-                        onTap: () =>
-                            _join(room.host, room.port, room.serviceName),
+                        onTap: () => _join(
+                          room.host,
+                          room.port,
+                          room.serviceName,
+                          gameId: room.gameId,
+                        ),
                       ),
                     );
                   },

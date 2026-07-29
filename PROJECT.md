@@ -194,8 +194,7 @@ All amounts are `int`. All models are hand-written JSON (`toJson`/`fromJson`)
 
 ## Protocol (`ws_message.dart`)
 
-Intents (client→server): `joinRequest` (optional `spectator: true` — see
-Spectator mode below), `paymentIntent` (optional requestId
+Intents (client→server): `joinRequest`, `paymentIntent` (optional requestId
 settles a money request), `buyProperty` (optional price = auction bid),
 `payRent` (optional payerId = owner-side POS charge), `setHouses`,
 `mortgage` (propertyId + mortgage bool), `transferProperty` (propertyId +
@@ -222,19 +221,6 @@ intents aren't txId/completer-based — they're fire-and-forget like
 `rollDice`/`drawCard`, since bidding is inherently multi-user/live rather
 than a single request-response; rejections surface via the `errors` stream.
 
-### Spectator mode
-
-A read-only viewer (e.g. a TV running the dashboard) joins with
-`spectator: true` in its `joinRequest`. The server (`GameServer._handleSpectate`)
-never creates a `Player`, never binds a playerId to the connection (so no
-intent from it is ever dispatched), and just adds the socket to a
-`_spectators` set that rides every `_broadcast` alongside `_connections`.
-Client-side, `GameProvider.watchRoom` sets `_spectating` and skips all
-local DB persistence (`_persistLocally` gates every write) — a spectator
-session is never saved to this device's games list. `GamesTab`'s "Watch a
-room's dashboard" pushes `JoinGameScreen(spectator: true)`, which lands on
-`DashboardScreen` instead of `GameScreen` and needs no player name.
-
 ## Services (`lib/services/`) — logic lives here, screens stay thin
 
 - `game_engine.dart` — pure rules: applyPayment, validatePurchase (rejects
@@ -248,8 +234,7 @@ room's dashboard" pushes `JoinGameScreen(spectator: true)`, which lands on
   (`_movePlayer`/`_resolveLanding`) on boards with a curated layout;
   `_resolveJailTurn`/`_handlePayJailFine` implement the jail rule.
   `_handleStartAuction`/`_handlePlaceBid`/`_handleCloseAuction` run live
-  auctions purely in memory (`_auctions`); `_spectators` is a parallel set
-  of read-only sockets that get every broadcast but never a bound playerId.
+  auctions purely in memory (`_auctions`).
 - `game_client.dart` — transport only (web_socket_channel).
 - `database_service.dart` — sqflite; v4 schema: `boards`, `games`
   (+current_turn_id, last_roll, turn_rolled — roll state survives a host
@@ -271,16 +256,14 @@ room's dashboard" pushes `JoinGameScreen(spectator: true)`, which lands on
 
 ## Providers (`lib/providers/`, package:provider)
 
-- `GameProvider` — THE session object (host or client, or a read-only
-  spectator): state, all actions
+- `GameProvider` — THE session object (host or client): state, all actions
   (sendPayment/collectSalary/buyProperty/payRent/setHouses/requestMoney/
   respondToIncomingRequest/rollDice/drawCard/editTransactionNote/
-  payJailFine/startAuction/placeBid/closeAuction/endTurn), `watchRoom`
-  (spectator join), reconnect, LAN IP
+  payJailFine/startAuction/placeBid/closeAuction/endTurn), reconnect, LAN IP
   (`roomEndpoint` — network_info_plus with NetworkInterface fallback for
   Windows), `errors` + `cardDraws` + `diceRolls` streams,
   `canAct`/`canResolve`/`canRoll`/`canEndTurn`/`canPayJailFine`,
-  `freeParkingPot`, `auctions`/`auctionFor`, `isSpectating`.
+  `freeParkingPot`, `auctions`/`auctionFor`.
 - `GamesProvider` (home list), `BoardsProvider` (board CRUD).
 
 ## Screens & UX conventions
@@ -288,10 +271,7 @@ room's dashboard" pushes `JoinGameScreen(spectator: true)`, which lands on
 Flat layout: `lib/screens`, `lib/widgets`, `lib/theme`, `lib/utils`.
 
 - `home_screen` → `games_tab` (games list; "Live" badge = actually connected
-  now; tapping opens instantly and connects in background; "Watch a room's
-  dashboard" connects read-only as a spectator instead — see Spectator
-  mode — and lands on `dashboard_screen` without adding anything to this
-  list) + `boards_tab`
+  now; tapping opens instantly and connects in background) + `boards_tab`
   (editor, duplicate, clipboard copy/paste, file import/export via
   file_selector — desktop-only save dialog). No boards are bundled by
   default — hosting requires creating or importing at least one.
@@ -350,9 +330,8 @@ Flat layout: `lib/screens`, `lib/widgets`, `lib/theme`, `lib/utils`.
   blocks over-asking; NFC tap-to-pay (amount first → tap card → confirm).
 - `dashboard_screen` — table-wide view for big screens (players grid, turn +
   dice banner, running `AuctionCard`s, shared activity feed, and the board
-  view when the board has a layout). Reachable either as a normal player
-  (in-game popup menu → Dashboard) or, without ever joining, via
-  `games_tab`'s spectator "Watch" entry.
+  view when the board has a layout). Reachable as a normal player via the
+  in-game popup menu → Dashboard.
 - `board_editor_screen` — properties order **is** the board layout, edited
   either as a `RingBoard` (default — long-press and drag a square to where
   it belongs, tap to edit, empty ring slots add there) or, via a toggle, a
@@ -372,8 +351,8 @@ Flat layout: `lib/screens`, `lib/widgets`, `lib/theme`, `lib/utils`.
   balance, shared by game/dashboard/activity), `player_card_sheet` (debit-
   card styled, "Register a physical card"), `player_avatar` (presence dot,
   highlight ring), `auction_card.dart` (one live auction: current bid,
-  who's leading, bid box, close button — read-only for spectators),
-  `amount_keypad`, `section_header`, `empty_state`.
+  who's leading, bid box, close button), `amount_keypad`, `section_header`,
+  `empty_state`.
 - Theme (`app_theme.dart`): violet fintech accent #635BFF, hero gradient,
   radius 22, light+dark, **platform font only** (no google_fonts —
   offline + flicker), `FloatingLabelBehavior.always` (narrow numeric fields

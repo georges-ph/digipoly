@@ -99,48 +99,46 @@ class _AuctionCardState extends State<AuctionCard> {
               color: iAmLeading ? AppColors.income : null,
             ),
           ),
-          if (!session.isSpectating) ...[
-            const SizedBox(height: 10),
-            Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _controller,
-                    keyboardType: TextInputType.number,
-                    decoration: InputDecoration(
-                      isDense: true,
-                      labelText: 'Your bid',
-                      prefixText: '${board.currencySymbol} ',
-                    ),
-                    onSubmitted: (_) => _bid(session),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _controller,
+                  keyboardType: TextInputType.number,
+                  decoration: InputDecoration(
+                    isDense: true,
+                    labelText: 'Your bid',
+                    prefixText: '${board.currencySymbol} ',
                   ),
+                  onSubmitted: (_) => _bid(session),
                 ),
-                const SizedBox(width: 8),
-                FilledButton(
-                  onPressed: () => _bid(session),
-                  child: const Text('Bid'),
-                ),
-              ],
-            ),
-            if (_error != null) ...[
-              const SizedBox(height: 6),
-              Text(
-                _error!,
-                style: textTheme.bodySmall?.copyWith(color: AppColors.expense),
+              ),
+              const SizedBox(width: 8),
+              FilledButton(
+                onPressed: () => _bid(session),
+                child: const Text('Bid'),
               ),
             ],
-            Align(
-              alignment: Alignment.centerRight,
-              child: TextButton(
-                onPressed: () => session.closeAuction(auction.propertyId),
-                child: Text(
-                  bidderId == null
-                      ? 'Cancel auction'
-                      : 'Close — sell to $bidderName',
-                ),
-              ),
+          ),
+          if (_error != null) ...[
+            const SizedBox(height: 6),
+            Text(
+              _error!,
+              style: textTheme.bodySmall?.copyWith(color: AppColors.expense),
             ),
           ],
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton(
+              onPressed: () => session.closeAuction(auction.propertyId),
+              child: Text(
+                bidderId == null
+                    ? 'Cancel auction'
+                    : 'Close — sell to $bidderName',
+              ),
+            ),
+          ),
         ],
       ),
     );

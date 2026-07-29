@@ -27,7 +27,6 @@ class GameClient {
     required int port,
     required String playerId,
     required String playerName,
-    bool spectator = false,
   }) async {
     await disconnect();
     _setStatus(ClientStatus.connecting);
@@ -41,7 +40,9 @@ class GameClient {
       _channel = channel;
       channel.stream.listen(
         (raw) {
-          if (raw is String) _messages.add(WsMessage.decode(raw));
+          if (raw is String && !_messages.isClosed) {
+            _messages.add(WsMessage.decode(raw));
+          }
         },
         onDone: () => _handleClosed(channel),
         onError: (_) => _handleClosed(channel),
@@ -51,7 +52,6 @@ class GameClient {
       send(WsMessage(MessageType.joinRequest, {
         'playerId': playerId,
         'name': playerName,
-        if (spectator) 'spectator': true,
       }));
       _setStatus(ClientStatus.connected);
       return ok(null);
@@ -220,7 +220,7 @@ class GameClient {
   }
 
   void _setStatus(ClientStatus status) {
-    if (_status == status) return;
+    if (_status == status || _statusChanges.isClosed) return;
     _status = status;
     _statusChanges.add(status);
   }

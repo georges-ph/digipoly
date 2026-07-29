@@ -51,9 +51,19 @@ class _WebJoinScreenState extends State<WebJoinScreen> {
     await context.read<IdentityService>().setDisplayName(name);
     if (!mounted) return;
 
-    final result = await context
-        .read<GameProvider>()
-        .joinRoom(host: widget.host, port: widget.port);
+    Result<void> result;
+    try {
+      result = await context
+          .read<GameProvider>()
+          .joinRoom(host: widget.host, port: widget.port);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _joining = false;
+        _error = 'Could not reach the host: $e';
+      });
+      return;
+    }
     if (!mounted) return;
 
     if (result.isOk) {

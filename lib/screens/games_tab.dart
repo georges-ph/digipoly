@@ -93,15 +93,6 @@ class _GamesTabState extends State<GamesTab> {
     if (mounted) context.read<GamesProvider>().load();
   }
 
-  /// Watches a room's dashboard on a spare screen (a TV, a second window) —
-  /// no seat, no name, nothing added to this device's games list.
-  Future<void> _watch() async {
-    await Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const JoinGameScreen(spectator: true)),
-    );
-    if (mounted) await context.read<GameProvider>().closeSession();
-  }
-
   @override
   Widget build(BuildContext context) {
     final games = context.watch<GamesProvider>();
@@ -190,11 +181,6 @@ class _GamesTabState extends State<GamesTab> {
                       ),
                     ),
                   ],
-                ),
-                TextButton.icon(
-                  onPressed: _watch,
-                  icon: const Icon(Icons.tv_rounded, size: 18),
-                  label: const Text("Watch a room's dashboard"),
                 ),
               ],
             ),
