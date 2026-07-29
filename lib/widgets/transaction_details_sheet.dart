@@ -234,18 +234,19 @@ class TransactionDetailsSheet extends StatelessWidget {
                       ),
                     ),
                   ),
-                  InkWell(
-                    onTap: () => _editNote(context),
-                    borderRadius: BorderRadius.circular(20),
-                    child: Padding(
-                      padding: const EdgeInsets.all(4),
-                      child: Icon(
-                        Icons.edit_outlined,
-                        size: 18,
-                        color: scheme.onSurfaceVariant,
+                  if (!session.isSpectating)
+                    InkWell(
+                      onTap: () => _editNote(context),
+                      borderRadius: BorderRadius.circular(20),
+                      child: Padding(
+                        padding: const EdgeInsets.all(4),
+                        child: Icon(
+                          Icons.edit_outlined,
+                          size: 18,
+                          color: scheme.onSurfaceVariant,
+                        ),
                       ),
                     ),
-                  ),
                 ],
               ),
             ),

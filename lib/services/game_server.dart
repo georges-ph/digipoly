@@ -54,6 +54,10 @@ class GameServer {
 
   final Map<String, WebSocketChannel> _connections = {};
 
+  /// Read-only viewers (e.g. a TV running the dashboard) — never a seat,
+  /// never part of the turn rotation, just along for every broadcast.
+  final Set<WebSocketChannel> _spectators = {};
+
   HttpServer? _http;
 
   /// The bundled web app, keyed by normalized path. Null when not bundled.
@@ -90,6 +94,7 @@ class GameServer {
       ..addEntries(ownerships.map((o) => MapEntry(o.propertyId, o)));
     _pendingRequests.clear();
     _auctions.clear();
+    _spectators.clear();
     // Roll state is restored from the DB so restarting the host app
     // mid-turn doesn't hand the current player a fresh roll.
     _currentTurnId = currentTurnId;
@@ -136,6 +141,11 @@ class GameServer {
       channel.sink.close();
     }
     _connections.clear();
+    for (final channel in _spectators.toList()) {
+      channel.sink.add(const WsMessage(MessageType.gameClosed).encode());
+      channel.sink.close();
+    }
+    _spectators.clear();
     await _http?.close(force: true);
     _http = null;
     _game = null;
@@ -206,7 +216,11 @@ class GameServer {
         if (raw is! String) return;
         final message = WsMessage.decode(raw);
         if (message.type == MessageType.joinRequest) {
-          boundPlayerId = _handleJoin(channel, message.payload);
+          if (message.payload['spectator'] == true) {
+            _handleSpectate(channel);
+          } else {
+            boundPlayerId = _handleJoin(channel, message.payload);
+          }
           return;
         }
         final playerId = boundPlayerId;
@@ -252,11 +266,32 @@ class GameServer {
       },
       onDone: () {
         final playerId = boundPlayerId;
-        if (playerId != null) _handleDisconnect(playerId, channel);
+        if (playerId != null) {
+          _handleDisconnect(playerId, channel);
+        } else {
+          _spectators.remove(channel);
+        }
       },
       onError: (_) {},
       cancelOnError: false,
     );
+  }
+
+  /// Registers a read-only viewer: sends the current snapshot so the
+  /// dashboard has something to show, then rides every future broadcast.
+  /// Never becomes a player and never bound to a playerId, so no intent
+  /// from this connection is ever honored.
+  void _handleSpectate(WebSocketChannel channel) {
+    if (_game == null) {
+      _send(channel, const WsMessage(MessageType.joinRejected, {
+        'reason': 'Invalid join request.',
+      }));
+      return;
+    }
+    _spectators.add(channel);
+    _send(channel, WsMessage(MessageType.joinAccepted, {
+      'snapshot': _snapshot().toJson(),
+    }));
   }
 
   String? _handleJoin(WebSocketChannel channel, Map<String, dynamic> payload) {
@@ -1331,6 +1366,9 @@ class GameServer {
     for (final entry in _connections.entries) {
       if (entry.key == except) continue;
       entry.value.sink.add(encoded);
+    }
+    for (final channel in _spectators) {
+      channel.sink.add(encoded);
     }
   }
 }

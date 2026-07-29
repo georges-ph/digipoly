@@ -64,6 +64,10 @@ class GameProvider extends ChangeNotifier {
   bool _disposed = false;
   Timer? _reconnectTimer;
 
+  /// Watching a room read-only (e.g. a TV running the dashboard) — never a
+  /// seat, never persisted to this device's games list.
+  bool _spectating = false;
+
   Completer<Result<void>>? _pendingJoin;
   Completer<Result<void>>? _pendingRoll;
   final Map<String, Completer<Result<void>>> _pendingPayments = {};
@@ -98,9 +102,13 @@ class GameProvider extends ChangeNotifier {
   bool get isHost => _record?.role == GameRole.host;
   String get myPlayerId => _identity.playerId;
 
+  /// Watching read-only — no seat, no balance, not part of the rotation.
+  bool get isSpectating => _spectating;
+
   /// Whether incoming events should be cached to this device's local DB —
-  /// the host already persisted them.
-  bool get _persistLocally => !isHost;
+  /// the host already persisted them, and a spectator session isn't a game
+  /// this device belongs to, so neither writes anything locally.
+  bool get _persistLocally => !isHost && !_spectating;
 
   Player? get me {
     for (final player in _players) {
@@ -319,6 +327,18 @@ class GameProvider extends ChangeNotifier {
     return _connect(host, port);
   }
 
+  /// Watches a room read-only — no seat, no balance, never part of the
+  /// turn rotation, and never saved to this device's games list. Meant for
+  /// a spare screen (a TV) running just the dashboard.
+  Future<Result<void>> watchRoom({
+    required String host,
+    required int port,
+  }) async {
+    await closeSession();
+    _joinTarget = (host: host, port: port);
+    return _connect(host, port, spectator: true);
+  }
+
   Future<Result<void>> _startHosting({
     required Game game,
     required List<Player> players,
@@ -368,9 +388,14 @@ class GameProvider extends ChangeNotifier {
     return _connect('127.0.0.1', port);
   }
 
-  Future<Result<void>> _connect(String host, int port) async {
+  Future<Result<void>> _connect(
+    String host,
+    int port, {
+    bool spectator = false,
+  }) async {
     _hostEnded = false;
     _closing = false;
+    _spectating = spectator;
 
     _messageSub?.cancel();
     _statusSub?.cancel();
@@ -387,6 +412,7 @@ class GameProvider extends ChangeNotifier {
       port: port,
       playerId: _identity.playerId,
       playerName: _identity.displayName,
+      spectator: spectator,
     );
     if (!connected.isOk) {
       _scheduleReconnectIfResumable();
@@ -438,6 +464,7 @@ class GameProvider extends ChangeNotifier {
     _incomingRequest = null;
     _connection = ClientStatus.disconnected;
     _joinTarget = null;
+    _spectating = false;
     _pendingJoin = null;
     _pendingRoll = null;
     _pendingPayments.clear();
@@ -924,7 +951,7 @@ class GameProvider extends ChangeNotifier {
     if (isHost) {
       // The server already persisted players and transactions.
       _db.upsertGameRecord(_record!);
-    } else {
+    } else if (!_spectating) {
       _db.saveSnapshot(_record!, snapshot);
     }
 
@@ -953,7 +980,7 @@ class GameProvider extends ChangeNotifier {
     }
 
     _record = record.copyWith(lastPlayedAt: DateTime.now());
-    _db.upsertGameRecord(_record!);
+    if (!_spectating) _db.upsertGameRecord(_record!);
     if (_persistLocally) {
       _db.upsertPlayers(record.game.id, _players);
       _db.insertTransactions(record.game.id, [tx]);
@@ -1011,7 +1038,7 @@ class GameProvider extends ChangeNotifier {
     _reconnectTimer = Timer(const Duration(seconds: 4), () {
       if (_closing || _hostEnded || _record == null) return;
       if (_connection != ClientStatus.disconnected) return;
-      _connect(host, port);
+      _connect(host, port, spectator: _spectating);
     });
   }
 

@@ -20,6 +20,27 @@ class DashboardScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final session = context.watch<GameProvider>();
+    return PopScope(
+      canPop: true,
+      onPopInvokedWithResult: (didPop, result) {
+        // A spectator session belongs to nothing but this screen — leaving
+        // it (back button, close) should tear the connection down. A
+        // normal player reaching the dashboard from the in-game popup menu
+        // keeps their session alive underneath, same as any other push.
+        if (didPop && session.isSpectating) session.closeSession();
+      },
+      child: _DashboardBody(session: session),
+    );
+  }
+}
+
+class _DashboardBody extends StatelessWidget {
+  const _DashboardBody({required this.session});
+
+  final GameProvider session;
+
+  @override
+  Widget build(BuildContext context) {
     final game = session.game;
     if (game == null) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));

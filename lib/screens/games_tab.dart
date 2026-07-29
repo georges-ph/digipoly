@@ -93,6 +93,18 @@ class _GamesTabState extends State<GamesTab> {
     if (mounted) context.read<GamesProvider>().load();
   }
 
+  /// Watches a room's dashboard on a spare screen (a TV, a second window) —
+  /// no seat, no name, nothing added to this device's games list. Session
+  /// teardown happens in [DashboardScreen] itself when it's popped — not
+  /// here, since `JoinGameScreen` reaches the dashboard via
+  /// `pushReplacement`, which completes *this* push's future the moment
+  /// the dashboard appears, not when the user actually leaves it.
+  Future<void> _watch() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const JoinGameScreen(spectator: true)),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final games = context.watch<GamesProvider>();
@@ -181,6 +193,12 @@ class _GamesTabState extends State<GamesTab> {
                       ),
                     ),
                   ],
+                ),
+                const SizedBox(height:16),
+                TextButton.icon(
+                  onPressed: _watch,
+                  icon: const Icon(Icons.tv_rounded, size: 18),
+                  label: const Text("Watch a room's dashboard"),
                 ),
               ],
             ),

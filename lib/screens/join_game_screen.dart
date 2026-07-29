@@ -9,12 +9,17 @@ import '../services/game_server.dart';
 import '../theme/app_theme.dart';
 import '../utils/snack.dart';
 import '../widgets/section_header.dart';
+import 'dashboard_screen.dart';
 import 'game_screen.dart';
 
 /// Rooms discovered on the local network via mDNS, plus a manual
 /// address fallback for networks that block multicast.
 class JoinGameScreen extends StatefulWidget {
-  const JoinGameScreen({super.key});
+  const JoinGameScreen({super.key, this.spectator = false});
+
+  /// Watch the room's dashboard read-only instead of joining as a player —
+  /// no seat, no name needed, nothing saved to this device's games list.
+  final bool spectator;
 
   @override
   State<JoinGameScreen> createState() => _JoinGameScreenState();
@@ -46,7 +51,8 @@ class _JoinGameScreenState extends State<JoinGameScreen> {
     // Already hosting/connected to this exact room on this device (e.g.
     // tapping your own room in the discovered list) — reconnecting would
     // tear down and kill the very session we're trying to reach. Reuse it.
-    if (gameId != null &&
+    if (!widget.spectator &&
+        gameId != null &&
         gameId.isNotEmpty &&
         gameId == session.record?.game.id &&
         session.hasActiveSession) {
@@ -60,7 +66,9 @@ class _JoinGameScreenState extends State<JoinGameScreen> {
 
     Result<void> result;
     try {
-      result = await session.joinRoom(host: host, port: port);
+      result = widget.spectator
+          ? await session.watchRoom(host: host, port: port)
+          : await session.joinRoom(host: host, port: port);
     } catch (e) {
       if (!mounted) return;
       setState(() => _joiningKey = null);
@@ -72,7 +80,10 @@ class _JoinGameScreenState extends State<JoinGameScreen> {
 
     if (result.isOk) {
       Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => const GameScreen()),
+        MaterialPageRoute(
+          builder: (_) =>
+              widget.spectator ? const DashboardScreen() : const GameScreen(),
+        ),
       );
     } else {
       showSnack(context, result.error!);
@@ -116,7 +127,7 @@ class _JoinGameScreenState extends State<JoinGameScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Join a game'),
+        title: Text(widget.spectator ? 'Watch a game' : 'Join a game'),
       ),
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
