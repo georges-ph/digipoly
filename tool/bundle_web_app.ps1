@@ -7,11 +7,20 @@
 
 $ErrorActionPreference = 'Stop'
 
+$zip = "assets/web/web_app.zip"
+
+# Must happen BEFORE `flutter build web`: pubspec.yaml declares assets/web/
+# as an asset folder, so a stale zip left here gets bundled into the new
+# web build as one of its own assets — nesting last run's zip inside this
+# run's zip. Left unfixed, every run adds another full copy on top of all
+# the previous ones (35MB -> 70MB -> 105MB -> ... -> the 175MB this was
+# found at), inflating both web_app.zip itself and the Android APK it's
+# embedded into.
+if (Test-Path $zip) { Remove-Item $zip }
+
 flutter build web
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-$zip = "assets/web/web_app.zip"
-if (Test-Path $zip) { Remove-Item $zip }
 New-Item -ItemType Directory -Force (Split-Path $zip) | Out-Null
 
 Compress-Archive -Path build/web/* -DestinationPath $zip
