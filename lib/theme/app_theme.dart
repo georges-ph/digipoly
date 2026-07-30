@@ -29,19 +29,29 @@ abstract final class AppColors {
 
   /// Deterministic avatar palette: every device derives the same color for
   /// the same player id, so avatars match across phones with no syncing.
+  /// Each entry is a distinct hue — no two are light/dark shades of the
+  /// same color (the one deliberate exception being sky vs. navy blue,
+  /// which read as clearly different colors rather than a gradient).
   static const avatarPalette = [
-    Color(0xFF635BFF),
-    Color(0xFF16C784),
-    Color(0xFFFF8A48),
-    Color(0xFFFF5C7A),
-    Color(0xFF2FB8E8),
-    Color(0xFFB16CEF),
-    Color(0xFFF2B33D),
-    Color(0xFF4ECB8C),
+    Color(0xFF635BFF), // violet
+    Color(0xFF16C784), // emerald
+    Color(0xFFFF7A45), // orange
+    Color(0xFFF5365C), // rose red
+    Color(0xFF29B6F6), // sky blue
+    Color(0xFF2C5FBD), // navy blue
+    Color(0xFFF4B400), // gold
+    Color(0xFFE84393), // magenta
   ];
 
   static Color avatarColor(String id) =>
       avatarPalette[id.hashCode.abs() % avatarPalette.length];
+
+  /// Seat-based avatar color: seats are assigned by the server in join
+  /// order and synced to every client, so indexing the palette by seat
+  /// (instead of hashing the player id) guarantees no two players at the
+  /// same table share a color, up to [avatarPalette]'s length.
+  static Color avatarColorForSeat(int seat) =>
+      avatarPalette[seat % avatarPalette.length];
 }
 
 abstract final class AppTheme {

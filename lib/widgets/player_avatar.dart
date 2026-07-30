@@ -3,9 +3,9 @@ import 'package:flutter/material.dart';
 import '../models/player.dart';
 import '../theme/app_theme.dart';
 
-/// Initials avatar with a color derived from the player id, so every device
-/// shows the same color for the same player. Shows an online dot and fades
-/// players who left.
+/// Initials avatar with a color derived from the player's seat, so every
+/// device shows the same color for the same player and no two players at
+/// the table share a color. Shows an online dot and fades players who left.
 class PlayerAvatar extends StatelessWidget {
   const PlayerAvatar({
     super.key,
@@ -35,7 +35,7 @@ class PlayerAvatar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = AppColors.avatarColor(player.id);
+    final color = AppColors.avatarColorForSeat(player.seat);
     final avatar = Container(
       width: size,
       height: size,

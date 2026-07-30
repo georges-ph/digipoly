@@ -339,9 +339,17 @@ Flat layout: `lib/screens`, `lib/widgets`, `lib/theme`, `lib/utils`.
   classic 40-square board gets an 11x11 grid, same as the real thing),
   corner-to-corner in list order, with every player's token shown as a
   small `PlayerAvatar` (initials + their consistent color, not just a
-  plain dot) at their current square, plus who owns each ownable square
-  (a thin strip in the owner's avatar color, a warning tone once
-  mortgaged) and its house/hotel icons; tapping an ownable square opens
+  plain dot) at their current square, plus who owns each ownable square —
+  the **whole tile tinted in the owner's avatar color** (a thin strip
+  above the group-color band used to be there, but read as unnoticeable
+  from across a room; a warning tone replaces it once mortgaged) — and its
+  house/hotel icons. Each square's own group-color band sits on whichever
+  side faces the board's center, not always the top — a top-row square is
+  banded along its bottom, a left-column one along its right, and so on
+  (`BoardLayoutView` classifies every square by row/col via
+  `utils/board_ring.dart`'s `ringCells`, corners resolving to their row's
+  edge since they aren't ownable and carry no band anyway) — like a real
+  board rather than a plain top-of-tile strip. Tapping an ownable square opens
   `properties_screen` (`openPropertyId`). `RingBoard` renders
   **rectangular** edge squares (tall/narrow on top & bottom, wide/short on
   the sides, like a real board) with big square corners rather than
@@ -383,7 +391,12 @@ Flat layout: `lib/screens`, `lib/widgets`, `lib/theme`, `lib/utils`.
   (`buildActivityFeed(context, session, limit)` — day headers + running
   balance, shared by game/dashboard/activity), `player_card_sheet` (debit-
   card styled, "Register a physical card"), `player_avatar` (presence dot,
-  highlight ring), `auction_card.dart` (one live auction: current bid,
+  highlight ring; color is keyed by **seat**, not a hash of the player id
+  — `AppColors.avatarColorForSeat` — so two players at the same table
+  never collide on a color, unlike the old id-hash scheme; the 8-color
+  palette itself is one hue per player, no near-duplicate shades of the
+  same color, aside from a deliberate sky-blue/navy-blue pair),
+  `auction_card.dart` (one live auction: current bid,
   who's leading, bid box, close button — read-only for spectators),
   `amount_keypad`, `section_header`, `empty_state`.
 - Theme (`app_theme.dart`): violet fintech accent #635BFF, hero gradient,
