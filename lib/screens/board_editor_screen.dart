@@ -585,6 +585,12 @@ class _CardList extends StatelessWidget {
       return 'a removed square';
     }
 
+    String? moveBySubtitle(BoardCard card) {
+      final spaces = card.moveBySpaces;
+      if (spaces == null) return null;
+      return spaces < 0 ? 'Back ${-spaces} spaces' : 'Forward $spaces spaces';
+    }
+
     return Column(
       children: [
         for (final card in cards)
@@ -601,10 +607,12 @@ class _CardList extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
               style: textTheme.bodyMedium,
             ),
-            subtitle: moveTargetName(card) == null
+            subtitle: (moveTargetName(card) ?? moveBySubtitle(card)) == null
                 ? null
                 : Text(
-                    'Moves to ${moveTargetName(card)}',
+                    moveTargetName(card) != null
+                        ? 'Moves to ${moveTargetName(card)}'
+                        : moveBySubtitle(card)!,
                     style: textTheme.bodySmall
                         ?.copyWith(color: scheme.onSurfaceVariant),
                   ),
@@ -935,7 +943,7 @@ class _PropertySheetState extends State<_PropertySheet> {
 // Card editing sheet
 // ---------------------------------------------------------------------------
 
-enum _CardEffect { money, move }
+enum _CardEffect { money, move, moveBy }
 
 class _CardSheet extends StatefulWidget {
   const _CardSheet({this.initial, required this.properties});
@@ -957,16 +965,25 @@ class _CardSheetState extends State<_CardSheet> {
         ? ''
         : '${widget.initial!.amount.abs()}',
   );
+  late final _spacesController = TextEditingController(
+    text: widget.initial?.moveBySpaces == null
+        ? ''
+        : '${widget.initial!.moveBySpaces!.abs()}',
+  );
   late bool _playerReceives = (widget.initial?.amount ?? 0) >= 0;
+  late bool _movesForward = (widget.initial?.moveBySpaces ?? -1) >= 0;
   late _CardEffect _effect = widget.initial?.moveToPropertyId != null
       ? _CardEffect.move
-      : _CardEffect.money;
+      : widget.initial?.moveBySpaces != null
+          ? _CardEffect.moveBy
+          : _CardEffect.money;
   late String? _moveTargetId = widget.initial?.moveToPropertyId;
 
   @override
   void dispose() {
     _textController.dispose();
     _amountController.dispose();
+    _spacesController.dispose();
     super.dispose();
   }
 
@@ -982,6 +999,20 @@ class _CardSheetState extends State<_CardSheet> {
           id: widget.initial?.id ?? const Uuid().v4(),
           text: text,
           moveToPropertyId: targetId,
+        ),
+        false,
+      ));
+      return;
+    }
+
+    if (_effect == _CardEffect.moveBy) {
+      final spaces = int.tryParse(_spacesController.text.trim()) ?? 0;
+      if (spaces == 0) return;
+      Navigator.of(context).pop((
+        BoardCard(
+          id: widget.initial?.id ?? const Uuid().v4(),
+          text: text,
+          moveBySpaces: _movesForward ? spaces : -spaces,
         ),
         false,
       ));
@@ -1049,6 +1080,10 @@ class _CardSheetState extends State<_CardSheet> {
                 value: _CardEffect.move,
                 label: Text('Move to property'),
               ),
+              ButtonSegment(
+                value: _CardEffect.moveBy,
+                label: Text('Move by spaces'),
+              ),
             ],
             selected: {_effect},
             onSelectionChanged: (selection) =>
@@ -1081,25 +1116,53 @@ class _CardSheetState extends State<_CardSheet> {
                 ),
               ],
             )
-          else if (widget.properties.isEmpty)
-            Text(
-              'Add some properties to the board first.',
-              style: textTheme.bodySmall,
-            )
+          else if (_effect == _CardEffect.move)
+            if (widget.properties.isEmpty)
+              Text(
+                'Add some properties to the board first.',
+                style: textTheme.bodySmall,
+              )
+            else
+              DropdownButtonFormField<String>(
+                initialValue:
+                    widget.properties.any((p) => p.id == _moveTargetId)
+                        ? _moveTargetId
+                        : null,
+                decoration: const InputDecoration(labelText: 'Destination'),
+                items: [
+                  for (final property in widget.properties)
+                    DropdownMenuItem(
+                      value: property.id,
+                      child: Text(property.name),
+                    ),
+                ],
+                onChanged: (value) => setState(() => _moveTargetId = value),
+              )
           else
-            DropdownButtonFormField<String>(
-              initialValue: widget.properties.any((p) => p.id == _moveTargetId)
-                  ? _moveTargetId
-                  : null,
-              decoration: const InputDecoration(labelText: 'Destination'),
-              items: [
-                for (final property in widget.properties)
-                  DropdownMenuItem(
-                    value: property.id,
-                    child: Text(property.name),
+            Row(
+              children: [
+                Expanded(
+                  child: SegmentedButton<bool>(
+                    segments: const [
+                      ButtonSegment(value: false, label: Text('Back')),
+                      ButtonSegment(value: true, label: Text('Forward')),
+                    ],
+                    selected: {_movesForward},
+                    onSelectionChanged: (selection) =>
+                        setState(() => _movesForward = selection.first),
                   ),
+                ),
+                const SizedBox(width: 12),
+                SizedBox(
+                  width: 110,
+                  child: TextField(
+                    controller: _spacesController,
+                    keyboardType: TextInputType.number,
+                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                    decoration: const InputDecoration(labelText: 'Spaces'),
+                  ),
+                ),
               ],
-              onChanged: (value) => setState(() => _moveTargetId = value),
             ),
           const SizedBox(height: 20),
           FilledButton(onPressed: _save, child: const Text('Save card')),

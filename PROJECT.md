@@ -133,16 +133,23 @@ board — boards with different names/currencies/properties must all work.
   the requestId. Server rejects upfront if target can't afford it; auto-
   declines (notifying both sides) if the accepted payment fails; requester
   backing out **withdraws** the request. Both sides' UI auto-dismisses.
-- **Chance / Community Chest**: quick actions draw a random card from the
-  board's deck **on the server**; revealed in a dialog on every device;
-  money effect auto-applied as a `card` transaction. A card is either a
-  money card or a **"go to X" move card** (`BoardCard.moveToPropertyId`,
-  authored in the board editor via a Money/Move to property toggle) —
-  drawing one moves the drawer's token straight to that square (paying GO
-  salary if passed/landed on, same as a normal roll) and resolves whatever
-  is there exactly like landing on it normally would; only meaningful on
-  boards with a curated layout. Boards with empty decks get a hint to add
-  cards in the editor.
+- **Chance / Community Chest**: quick actions draw the next card off the
+  board's deck **on the server** — a shuffled pile per deck, dealt in order
+  and reshuffled from scratch only once it runs out, like a physical stack
+  (not an independent random pick each time, which could repeat the same
+  card); revealed in a dialog on every device; money effect auto-applied as
+  a `card` transaction. A card is exactly one of: a money card, a **"go to
+  X" move card** (`BoardCard.moveToPropertyId`, authored via a Money/Move
+  to property/Move by spaces toggle) — drawing one moves the drawer's token
+  straight to that square (paying GO salary if passed/landed on, same as a
+  normal roll) and resolves whatever is there exactly like landing on it
+  normally would — or a **relative move card** (`BoardCard.moveBySpaces`,
+  e.g. the classic "Go Back 3 Spaces") — a signed step count applied
+  directly (never normalized into a forward distance), so it never pays GO
+  salary even if it happens to land exactly on GO, matching the physical
+  rule that backing up onto GO doesn't collect. Both move kinds are only
+  meaningful on boards with a curated layout. Boards with empty decks get a
+  hint to add cards in the editor.
 - **Landing auto-opens the property sheet**: on a board with a curated
   layout, whenever your own roll (or a "go to X" card) moves your token
   onto a street/railroad/utility, that property's sheet pops open right
@@ -167,8 +174,9 @@ All amounts are `int`. All models are hand-written JSON (`toJson`/`fromJson`)
 
 - `board.dart` — `Board` (currency, startingBalance, salary, jailFine,
   properties, chanceCards/communityChestCards) + `BoardCard` (text, amount:
-  + collect / − pay / 0 none; **or** `moveToPropertyId` — a "go to X" card,
-  never both). `goIndex`/`jailIndex` are computed getters
+  + collect / − pay / 0 none; **or** `moveToPropertyId` — a "go to X" card;
+  **or** `moveBySpaces` — a relative move, e.g. "Go Back 3 Spaces"; exactly
+  one of the three). `goIndex`/`jailIndex` are computed getters
   (first `properties` entry of that kind, or -1) — the board layout is
   just `properties` in physical order, not a separate list.
 - `property.dart` — `Property` (kind, colorValue, price, rentTiers,

@@ -1282,6 +1282,7 @@ class GameServer {
     // Only meaningful on a board with a curated layout — elsewhere there is
     // no position to move, so the card is shown with no further effect.
     final moveTarget = card.moveToPropertyId;
+    final moveBy = card.moveBySpaces;
     if (moveTarget != null && board.goIndex >= 0) {
       final targetIndex =
           board.properties.indexWhere((p) => p.id == moveTarget);
@@ -1291,6 +1292,15 @@ class GameServer {
             (targetIndex - mover.position) % board.properties.length;
         _movePlayer(mover, total);
       }
+    } else if (moveBy != null && moveBy != 0 && board.goIndex >= 0) {
+      // A relative move (e.g. "Go Back 3 Spaces") — passed straight through
+      // as a signed step count rather than normalized into a forward
+      // distance, so a negative move actually goes backward instead of
+      // wrapping almost all the way around the board. advancePosition's
+      // "crossed/landed on GO" check only ever fires forward, so this never
+      // pays GO salary even if it happens to land exactly on GO.
+      final mover = _players[playerId];
+      if (mover != null && !mover.inJail) _movePlayer(mover, moveBy);
     }
 
     _broadcast(WsMessage(MessageType.cardDrawn, {

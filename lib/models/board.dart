@@ -4,31 +4,42 @@ import 'property.dart';
 /// relative to the bank: positive means the player receives, negative means
 /// the player pays. Zero means the card has no direct money effect.
 ///
-/// [moveToPropertyId] is the other kind of effect a card can have: "Advance
-/// to X" — the drawer's token jumps straight to that square (paying GO
-/// salary if it's passed/landed on along the way) and whatever's there is
-/// then resolved exactly like landing on it normally would. A card is either
-/// a money card or a move card, never both — the board editor enforces
-/// that. Only meaningful on boards with a curated layout; elsewhere there is
-/// no position to move, so the card is shown but has no effect.
+/// [moveToPropertyId] is a forward "Advance to X" effect — the drawer's
+/// token jumps straight to that square (paying GO salary if it's passed/
+/// landed on along the way) and whatever's there is then resolved exactly
+/// like landing on it normally would.
+///
+/// [moveBySpaces] is a relative move by a fixed number of squares — positive
+/// forward, negative backward (the classic "Go Back 3 Spaces" card). Unlike
+/// [moveToPropertyId] this never pays GO salary, even if it happens to land
+/// exactly on GO, since backing up onto it isn't "passing" GO — matching the
+/// physical rule that a Go Back card never collects.
+///
+/// A card is exactly one of: a money card, a move-to card, or a move-by
+/// card — the board editor enforces that. Movement effects are only
+/// meaningful on boards with a curated layout; elsewhere there is no
+/// position to move, so the card is shown but has no effect.
 class BoardCard {
   const BoardCard({
     required this.id,
     required this.text,
     this.amount = 0,
     this.moveToPropertyId,
+    this.moveBySpaces,
   });
 
   final String id;
   final String text;
   final int amount;
   final String? moveToPropertyId;
+  final int? moveBySpaces;
 
   Map<String, dynamic> toJson() => {
         'id': id,
         'text': text,
         'amount': amount,
         if (moveToPropertyId != null) 'moveToPropertyId': moveToPropertyId,
+        if (moveBySpaces != null) 'moveBySpaces': moveBySpaces,
       };
 
   factory BoardCard.fromJson(Map<String, dynamic> json) => BoardCard(
@@ -36,12 +47,14 @@ class BoardCard {
         text: json['text'] as String? ?? '',
         amount: json['amount'] as int? ?? 0,
         moveToPropertyId: json['moveToPropertyId'] as String?,
+        moveBySpaces: json['moveBySpaces'] as int?,
       );
 
   BoardCard copyWith({
     String? text,
     int? amount,
     String? moveToPropertyId,
+    int? moveBySpaces,
     bool clearMoveTarget = false,
   }) =>
       BoardCard(
@@ -51,6 +64,9 @@ class BoardCard {
         moveToPropertyId: clearMoveTarget
             ? null
             : (moveToPropertyId ?? this.moveToPropertyId),
+        moveBySpaces: clearMoveTarget
+            ? null
+            : (moveBySpaces ?? this.moveBySpaces),
       );
 }
 
