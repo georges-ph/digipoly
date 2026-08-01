@@ -489,7 +489,9 @@ class GameServer {
   }
 
   /// Edits a past transaction's note — the amount and parties never change.
-  /// Either party to the transaction may add or correct it, any time.
+  /// Either party to a plain send/request may add or correct it, any time;
+  /// other transaction types carry a system-assigned label instead of a
+  /// free-form note, so they aren't editable.
   void _handleEditTransactionNote(
     String senderId,
     WebSocketChannel channel,
@@ -508,6 +510,14 @@ class GameServer {
     final target = _transactions[index];
     if (target.fromId != senderId && target.toId != senderId) {
       reject('You can only edit notes on your own transactions.');
+      return;
+    }
+    // A rent/purchase/mortgage/tax/etc. note is really the transaction's
+    // label, not something a player wrote — only free-form sends and
+    // requests have an editable note.
+    if (target.type != TransactionType.payment &&
+        target.type != TransactionType.request) {
+      reject('Only sent/requested payments have an editable note.');
       return;
     }
 

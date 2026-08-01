@@ -24,6 +24,13 @@ class TransactionDetailsSheet extends StatelessWidget {
   final GameProvider session;
   final int? balanceAfter;
 
+  /// Notes only make sense on free-form money moves — a rent/purchase/
+  /// mortgage/tax/etc. transaction's "note" is really just its label, not
+  /// something either party wrote, so editing it there would be confusing.
+  bool get _noteIsEditable =>
+      transaction.type == TransactionType.payment ||
+      transaction.type == TransactionType.request;
+
   String get _typeLabel => switch (transaction.type) {
         TransactionType.payment => 'Payment',
         TransactionType.rent => 'Rent',
@@ -234,7 +241,7 @@ class TransactionDetailsSheet extends StatelessWidget {
                       ),
                     ),
                   ),
-                  if (!session.isSpectating)
+                  if (!session.isSpectating && _noteIsEditable)
                     InkWell(
                       onTap: () => _editNote(context),
                       borderRadius: BorderRadius.circular(20),
