@@ -358,12 +358,19 @@ class GameServer {
   // --------------------------------------------------------------- Intents
 
   /// Shared tail of every money intent: run the engine, persist, broadcast.
-  /// Returns true when the transaction was applied.
+  /// Returns true when the transaction was applied. [viewerId] is whoever
+  /// will actually read a rejection (so "you don't have enough money"
+  /// phrases correctly instead of naming the sender in the third person).
   bool _applyTransaction(
     GameTransaction tx,
-    void Function(String reason) reject,
-  ) {
-    final result = GameEngine.applyPayment(_players.values.toList(), tx);
+    void Function(String reason) reject, {
+    String? viewerId,
+  }) {
+    final result = GameEngine.applyPayment(
+      _players.values.toList(),
+      tx,
+      viewerId: viewerId,
+    );
     if (!result.isOk) {
       reject(result.error!);
       return false;
@@ -447,7 +454,7 @@ class GameServer {
         request.targetId == senderId &&
         request.requesterId == tx.toId;
 
-    if (!_applyTransaction(tx, reject)) {
+    if (!_applyTransaction(tx, reject, viewerId: senderId)) {
       // The payer accepted but cannot cover it — settle the request as
       // declined so the requester is not left waiting.
       if (settlesRequest) {
@@ -550,7 +557,7 @@ class GameServer {
       timestamp: DateTime.now(),
       note: price == null ? '' : 'Auction',
     );
-    if (!_applyTransaction(tx, reject)) return;
+    if (!_applyTransaction(tx, reject, viewerId: senderId)) return;
 
     final ownership = PropertyOwnership(
       propertyId: propertyId,
@@ -780,6 +787,7 @@ class GameServer {
         timestamp: DateTime.now(),
       ),
       reject,
+      viewerId: senderId,
     );
   }
 
@@ -819,6 +827,7 @@ class GameServer {
         timestamp: DateTime.now(),
       ),
       reject,
+      viewerId: senderId,
     );
     if (!applied) return;
 
@@ -869,6 +878,7 @@ class GameServer {
         timestamp: DateTime.now(),
       ),
       reject,
+      viewerId: senderId,
     );
     if (!applied) return;
 
@@ -1096,6 +1106,7 @@ class GameServer {
             'txId': tx.id,
             'reason': reason,
           })),
+          viewerId: player.id,
         );
         if (applied) _freeParkingPot += amount;
       case PropertyKind.freeParking:
@@ -1169,6 +1180,7 @@ class GameServer {
             'txId': tx.id,
             'reason': reason,
           })),
+          viewerId: freed.id,
         );
         if (applied) _freeParkingPot += game.board.jailFine;
         _movePlayer(_players[freed.id]!, roll.total);
@@ -1205,7 +1217,7 @@ class GameServer {
       timestamp: DateTime.now(),
       note: 'Jail fine',
     );
-    if (!_applyTransaction(tx, reject)) {
+    if (!_applyTransaction(tx, reject, viewerId: senderId)) {
       _players[senderId] = player; // roll back — the fine wasn't paid
       return;
     }
@@ -1274,6 +1286,7 @@ class GameServer {
           'reason': reason,
         }),
       ),
+      viewerId: playerId,
     );
   }
 

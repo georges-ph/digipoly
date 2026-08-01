@@ -26,8 +26,9 @@ abstract final class GameEngine {
   /// with updated balances. The bank ([Player.bankId]) has infinite money.
   static Result<List<Player>> applyPayment(
     List<Player> players,
-    GameTransaction tx,
-  ) {
+    GameTransaction tx, {
+    String? viewerId,
+  }) {
     if (tx.amount <= 0) {
       return err('Amount must be greater than zero.');
     }
@@ -48,7 +49,9 @@ abstract final class GameEngine {
       if (from == null) return err('Unknown sender.');
       if (from.hasLeft) return err('${from.name} has left the game.');
       if (from.balance < tx.amount) {
-        return err('${from.name} does not have enough money.');
+        return err(from.id == viewerId
+            ? 'You do not have enough money.'
+            : '${from.name} does not have enough money.');
       }
     }
 
