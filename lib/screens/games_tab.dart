@@ -300,6 +300,7 @@ class _GameCard extends StatelessWidget {
                       ),
                       style: textTheme.titleMedium?.copyWith(
                         fontWeight: FontWeight.w800,
+                        color: balance! < 0 ? AppColors.expense : null,
                       ),
                     ),
                   const SizedBox(height: 4),

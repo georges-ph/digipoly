@@ -43,16 +43,15 @@ abstract final class GameEngine {
       return null;
     }
 
+    // Balances are allowed to go negative: a payment that can't be fully
+    // covered still goes through rather than silently doing nothing (there's
+    // no bankruptcy flow to fall back to) — the payer just owes the
+    // difference until they mortgage or sell something to catch up.
     Player? from;
     if (tx.fromId != Player.bankId) {
       from = find(tx.fromId);
       if (from == null) return err('Unknown sender.');
       if (from.hasLeft) return err('${from.name} has left the game.');
-      if (from.balance < tx.amount) {
-        return err(from.id == viewerId
-            ? 'You do not have enough money.'
-            : '${from.name} does not have enough money.');
-      }
     }
 
     Player? to;

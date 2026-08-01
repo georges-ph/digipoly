@@ -273,6 +273,7 @@ class _PlayerCard extends StatelessWidget {
             style: textTheme.headlineSmall?.copyWith(
               fontWeight: FontWeight.w800,
               letterSpacing: -0.5,
+              color: player.balance < 0 ? AppColors.expense : null,
             ),
           ),
           const SizedBox(height: 10),

@@ -1049,7 +1049,9 @@ class _GameScreenState extends State<GameScreen> {
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: textTheme.labelSmall?.copyWith(
-                            color: scheme.onSurfaceVariant,
+                            color: player.balance < 0
+                                ? AppColors.expense
+                                : scheme.onSurfaceVariant,
                             fontWeight: FontWeight.w700,
                           ),
                         ),

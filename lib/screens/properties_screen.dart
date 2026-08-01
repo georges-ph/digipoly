@@ -903,6 +903,9 @@ class _PropertySheetState extends State<_PropertySheet> {
                   );
                   if (rent.isOk) rentDue = rent.requireValue;
                 }
+                // Still flagged in red as a heads-up, but no longer blocks
+                // paying — balances are allowed to go negative rather than
+                // leaving rent stuck unpayable.
                 final insufficient =
                     rentDue != null && rentDue > session.myBalance;
 
@@ -952,9 +955,7 @@ class _PropertySheetState extends State<_PropertySheet> {
                     ),
                     const SizedBox(height: 12),
                     FilledButton.icon(
-                      onPressed: canResolve && !_busy && !insufficient
-                          ? _rentFlow
-                          : null,
+                      onPressed: canResolve && !_busy ? _rentFlow : null,
                       icon: const Icon(Icons.real_estate_agent_outlined),
                       label: Text(
                         rentDue != null

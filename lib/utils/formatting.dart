@@ -2,8 +2,10 @@ import 'package:intl/intl.dart';
 
 final NumberFormat _money = NumberFormat('#,##0');
 
-/// `1500` with symbol `$` -> `$1,500`.
-String formatMoney(int amount, String symbol) => '$symbol${_money.format(amount)}';
+/// `1500` with symbol `$` -> `$1,500`. `-1500` -> `-$1,500` (balances are
+/// allowed to go negative — debt owed rather than a blocked payment).
+String formatMoney(int amount, String symbol) =>
+    '${amount < 0 ? '-' : ''}$symbol${_money.format(amount.abs())}';
 
 /// Signed variant for transaction feeds: `+$200` / `-$60`.
 String formatSignedMoney(int amount, String symbol, {required bool incoming}) =>
