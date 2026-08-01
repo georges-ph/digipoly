@@ -5,9 +5,15 @@ import '../utils/formatting.dart';
 import 'transaction_details_sheet.dart';
 import 'transaction_tile.dart';
 
-/// Transaction tiles with day headers (Today / Yesterday / date) and my
-/// running balance, computed backwards from the current balance. Shared by
-/// the game screen (teaser) and the full activity screen.
+/// Transaction tiles with day headers (Today / Yesterday / date) and, on
+/// rows the viewer is actually a party to, their own running balance right
+/// after that transaction — computed backwards from their current balance.
+/// Rows between two other players carry no balance annotation: this feed is
+/// shared across every device, but there's only ever one player's balance
+/// (the viewer's own) to walk backwards from, so showing it next to a
+/// transaction that isn't theirs would just be someone else's number
+/// mislabeled. Shared by the game screen (teaser) and the full activity
+/// screen.
 List<Widget> buildActivityFeed(
   BuildContext context,
   GameProvider session, {
@@ -22,7 +28,9 @@ List<Widget> buildActivityFeed(
   var running = session.myBalance;
   var shown = 0;
   for (final tx in session.transactions) {
-    final balanceAfter = running;
+    final involvesMe =
+        tx.toId == session.myPlayerId || tx.fromId == session.myPlayerId;
+    final balanceAfter = involvesMe ? running : null;
     if (tx.toId == session.myPlayerId) running -= tx.amount;
     if (tx.fromId == session.myPlayerId) running += tx.amount;
 
