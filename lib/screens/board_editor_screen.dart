@@ -39,6 +39,8 @@ class _BoardEditorScreenState extends State<BoardEditorScreen> {
   late final _startingController =
       TextEditingController(text: '${_base.startingBalance}');
   late final _salaryController = TextEditingController(text: '${_base.salary}');
+  late final _jailFineController =
+      TextEditingController(text: '${_base.jailFine}');
 
   late final List<Property> _properties = List.of(_base.properties);
   late final List<BoardCard> _chanceCards = List.of(_base.chanceCards);
@@ -53,6 +55,7 @@ class _BoardEditorScreenState extends State<BoardEditorScreen> {
     _currencyController.dispose();
     _startingController.dispose();
     _salaryController.dispose();
+    _jailFineController.dispose();
     super.dispose();
   }
 
@@ -71,6 +74,7 @@ class _BoardEditorScreenState extends State<BoardEditorScreen> {
       startingBalance:
           int.tryParse(_startingController.text.trim()) ?? 1500,
       salary: int.tryParse(_salaryController.text.trim()) ?? 200,
+      jailFine: int.tryParse(_jailFineController.text.trim()) ?? 50,
       properties: _properties,
       chanceCards: _chanceCards,
       communityChestCards: _communityCards,
@@ -205,6 +209,18 @@ class _BoardEditorScreenState extends State<BoardEditorScreen> {
                       ),
                     ),
                   ],
+                ),
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: 160,
+                  child: TextField(
+                    controller: _jailFineController,
+                    keyboardType: TextInputType.number,
+                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                    decoration: const InputDecoration(
+                      labelText: 'Jail fine',
+                    ),
+                  ),
                 ),
                 const SizedBox(height: 20),
                 SectionHeader(
