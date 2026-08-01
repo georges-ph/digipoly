@@ -22,11 +22,33 @@ class AuctionCard extends StatefulWidget {
 
 class _AuctionCardState extends State<AuctionCard> {
   final _controller = TextEditingController();
+  final _focusNode = FocusNode();
   String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    // The player just tapped "Bid"/"Start an auction" to get here — make
+    // the field ready to type into immediately instead of making them tap
+    // it again, and keep it scrolled into view once the keyboard opens.
+    _focusNode.addListener(() {
+      if (!_focusNode.hasFocus) return;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          Scrollable.ensureVisible(
+            context,
+            alignment: 0.5,
+            duration: const Duration(milliseconds: 200),
+          );
+        }
+      });
+    });
+  }
 
   @override
   void dispose() {
     _controller.dispose();
+    _focusNode.dispose();
     super.dispose();
   }
 
@@ -48,6 +70,44 @@ class _AuctionCardState extends State<AuctionCard> {
     session.placeBid(widget.auction.propertyId, amount);
     _controller.clear();
     FocusScope.of(context).unfocus();
+  }
+
+  /// Closing sells the property (or cancels it) for good, so it always asks
+  /// first — and calls out explicitly when the person closing is also the
+  /// one about to win, since that's exactly the "bid low, close to myself"
+  /// move that shouldn't happen silently.
+  Future<void> _confirmClose(
+    GameProvider session, {
+    required String? bidderId,
+    required String? bidderName,
+    required String currency,
+  }) async {
+    final auction = widget.auction;
+    final sellingToSelf = bidderId == session.myPlayerId;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(bidderId == null ? 'Cancel this auction?' : 'Close the auction?'),
+        content: Text(
+          bidderId == null
+              ? 'Nobody has bid — the property stays unowned.'
+              : 'Sell for ${formatMoney(auction.currentBid, currency)} to '
+                  '$bidderName?'
+                  '${sellingToSelf ? ' You are the only bidder.' : ''}',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Back'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: Text(bidderId == null ? 'Cancel auction' : 'Close & sell'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) session.closeAuction(auction.propertyId);
   }
 
   @override
@@ -80,6 +140,17 @@ class _AuctionCardState extends State<AuctionCard> {
             children: [
               const Icon(Icons.gavel_rounded, size: 18, color: AppColors.accent),
               const SizedBox(width: 8),
+              if (property.kind.isOwnable) ...[
+                Container(
+                  width: 12,
+                  height: 12,
+                  decoration: BoxDecoration(
+                    color: Color(property.colorValue),
+                    borderRadius: BorderRadius.circular(3),
+                  ),
+                ),
+                const SizedBox(width: 6),
+              ],
               Expanded(
                 child: Text(
                   'Auction: ${property.name}',
@@ -106,6 +177,8 @@ class _AuctionCardState extends State<AuctionCard> {
                 Expanded(
                   child: TextField(
                     controller: _controller,
+                    focusNode: _focusNode,
+                    autofocus: true,
                     keyboardType: TextInputType.number,
                     decoration: InputDecoration(
                       isDense: true,
@@ -136,7 +209,12 @@ class _AuctionCardState extends State<AuctionCard> {
             Align(
               alignment: Alignment.centerRight,
               child: TextButton(
-                onPressed: () => session.closeAuction(auction.propertyId),
+                onPressed: () => _confirmClose(
+                  session,
+                  bidderId: bidderId,
+                  bidderName: bidderName,
+                  currency: board.currencySymbol,
+                ),
                 child: Text(
                   bidderId == null
                       ? 'Cancel auction'
