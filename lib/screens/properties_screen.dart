@@ -1093,9 +1093,13 @@ class _PropertySheetState extends State<_PropertySheet> {
                 ),
               ),
             ],
-            if (widget.nfcAvailable &&
-                canResolve &&
-                ownership?.ownerId != session.myPlayerId) ...[
+            // Only the owner benefits from an NFC hint here: buying or
+            // paying rent already has a button right in front of whoever's
+            // holding this phone, so tapping a card to trigger the same
+            // action would be pointless. The owner's phone, though, doubles
+            // as a payment terminal — another player taps their own card on
+            // it to pay rent, so that's worth calling out.
+            if (widget.nfcAvailable && isMine && owner != null) ...[
               const SizedBox(height: 10),
               Center(
                 child: Row(
@@ -1105,9 +1109,7 @@ class _PropertySheetState extends State<_PropertySheet> {
                         size: 14, color: scheme.onSurfaceVariant),
                     const SizedBox(width: 6),
                     Text(
-                      owner == null
-                          ? 'Or tap the property card to buy'
-                          : 'Or tap your payment card to pay the rent',
+                      'Have them tap their card here to charge rent',
                       style: textTheme.bodySmall
                           ?.copyWith(color: scheme.onSurfaceVariant),
                     ),
