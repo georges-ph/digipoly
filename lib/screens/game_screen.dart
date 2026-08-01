@@ -49,18 +49,15 @@ class _GameScreenState extends State<GameScreen> {
   StreamSubscription<String>? _errorSub;
   StreamSubscription<CardDrawEvent>? _cardDrawSub;
   StreamSubscription<DiceRoll>? _diceRollSub;
+  StreamSubscription<PropertyTransferEvent>? _transferSub;
   final _nfc = NfcService.instance;
   GameProvider? _session;
   bool _requestDialogOpen = false;
-  PersistentBottomSheetController? _boardSheetController;
-  // Whether the currently-open board sheet opened itself (a roll) rather
-  // than the player pinning it open via the app-bar toggle — only an
-  // auto-opened sheet auto-closes; a manually opened one stays until the
-  // player closes it themselves.
-  bool _boardOpenedAutomatically = false;
-  // Someone else's roll has no popup chain of mine to hook a close onto —
-  // give it a few seconds to actually be seen, then close it back up.
-  Timer? _boardAutoCloseTimer;
+  // Whether the board sheet is currently showing, and the BuildContext of
+  // its own route — needed to pop it from outside (the app-bar toggle)
+  // since it's a real modal route, not a persistent Scaffold sheet.
+  bool _boardSheetOpen = false;
+  BuildContext? _boardSheetContext;
 
   // My own roll can trigger up to three popups in a row (the dice sheet
   // itself, a card reveal if I landed on Chance/Chest, and the auto-opened
@@ -94,26 +91,28 @@ class _GameScreenState extends State<GameScreen> {
       if (!mounted) return;
       final isMine = event.playerId == _session?.myPlayerId;
       if (isMine) _cardHandledThisRoll = true;
-      _enqueueRollUi(() => _showCardDialog(event).then((_) {
-            // A "go to X" card moved me — offer the same landing actions as
-            // a normal roll once the reveal dialog is out of the way.
-            if (mounted && isMine) _maybeOpenLandedProperty();
-            _cardHandledThisRoll = false;
-          }));
+      // A "go to X"/"go back N" card moves the drawer — everything else
+      // (money, a jail card, repairs) leaves position untouched, so there's
+      // no landing to re-check once the dialog closes.
+      final moved = event.card.moveToPropertyId != null ||
+          (event.card.moveBySpaces ?? 0) != 0;
+      _enqueueRollUi(() async {
+        await _showCardDialog(event);
+        if (mounted && isMine && moved) await _afterRollReveal();
+        _cardHandledThisRoll = false;
+      });
     });
     // Every roll (anyone's) pops the board up so token movement is visible
     // wherever a player is looking — only on boards with a curated layout,
-    // and only if it isn't already open. Non-modal, so it's fine to show
-    // immediately rather than queuing behind the dice/card popups above.
-    // It auto-closes once that movement has actually been seen (see below)
-    // instead of staying pinned open indefinitely.
+    // and only if it isn't already open. It's a real modal now — blocks the
+    // rest of the screen like any other sheet — and stays open until
+    // whoever's looking at it closes it themselves; no timer, no auto-close.
     _diceRollSub = session.diceRolls.listen((roll) {
       if (!mounted) return;
       final isMine = roll.playerId == _session?.myPlayerId;
-      if (_boardSheetController == null &&
-          (_session?.game?.board.goIndex ?? -1) >= 0) {
-        _boardOpenedAutomatically = true;
-        _toggleBoardSheet();
+      final hasLayout = (_session?.game?.board.goIndex ?? -1) >= 0;
+      if (hasLayout && !isMine && !_boardSheetOpen) {
+        _openBoardSheet();
       }
       // Only my own roll moves my own token — offer to buy/pay rent/build
       // right away instead of making the player dig through Properties.
@@ -123,18 +122,33 @@ class _GameScreenState extends State<GameScreen> {
         if (_cardHandledThisRoll) {
           _cardHandledThisRoll = false;
         } else {
-          _enqueueRollUi(_maybeOpenLandedProperty);
+          _enqueueRollUi(_afterRollReveal);
         }
-        // My own roll has a real end to its popup chain (dice → card →
-        // property) — close the board once that chain is fully done.
-        _enqueueRollUi(_closeBoardSheetIfAutoOpened);
-      } else {
-        // Someone else's roll has no chain of mine to hook a close onto —
-        // just give it a few seconds to be seen.
-        _boardAutoCloseTimer?.cancel();
-        _boardAutoCloseTimer =
-            Timer(const Duration(seconds: 4), _closeBoardSheetIfAutoOpened);
       }
+    });
+    // Someone handed me a property directly (not a landing/buy) — worth a
+    // heads-up wherever I'm looking, same as an incoming money request.
+    _transferSub = session.propertyTransfers.listen((event) {
+      if (!mounted || event.toId != _session?.myPlayerId) return;
+      final session = _session;
+      if (session == null) return;
+      final property = session.propertyById(event.propertyId);
+      showDialog<void>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Property received'),
+          content: Text(
+            '${session.accountName(event.fromId)} gave you '
+            '${property?.name ?? 'a property'}.',
+          ),
+          actions: [
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      );
     });
     // Money requests pop as a dialog wherever the player currently is.
     session.addListener(_maybeShowRequestDialog);
@@ -154,46 +168,55 @@ class _GameScreenState extends State<GameScreen> {
     _errorSub?.cancel();
     _cardDrawSub?.cancel();
     _diceRollSub?.cancel();
-    _boardAutoCloseTimer?.cancel();
+    _transferSub?.cancel();
     _session?.removeListener(_maybeShowRequestDialog);
     _nfc.stopWatch();
     super.dispose();
   }
 
+  /// After my own roll (or a card that moved me) has been revealed: show
+  /// the board — so the move is actually seen before anything else pops up
+  /// — then, once I close it myself, open the landed property's sheet.
+  Future<void> _afterRollReveal() async {
+    if (!mounted) return;
+    if ((_session?.game?.board.goIndex ?? -1) >= 0) {
+      await _openBoardSheet();
+    }
+    if (mounted) _maybeOpenLandedProperty();
+  }
+
   /// The app-bar toggle and the sheet's own close button: an explicit,
-  /// player-driven open/close, not tied to any roll — pins it open (or
-  /// closed) regardless of the auto-close behavior below.
+  /// player-driven open/close.
   void _toggleBoardSheetManually() {
-    _boardAutoCloseTimer?.cancel();
-    _boardOpenedAutomatically = false;
-    _toggleBoardSheet();
+    if (_boardSheetOpen) {
+      final ctx = _boardSheetContext;
+      if (ctx != null) Navigator.of(ctx).pop();
+    } else {
+      _openBoardSheet();
+    }
   }
 
-  /// Closes the board sheet if (and only if) it's still open from an
-  /// auto-open — never closes one the player pinned open themselves.
-  void _closeBoardSheetIfAutoOpened() {
-    if (_boardOpenedAutomatically && _boardSheetController != null) {
-      _toggleBoardSheet();
-    }
-    _boardOpenedAutomatically = false;
-  }
-
-  /// Shows/hides the board as a non-modal panel docked to the bottom of the
-  /// screen — stays out of the way of the rest of the app, and (unlike a
-  /// modal sheet) doesn't get dismissed by tapping elsewhere.
-  void _toggleBoardSheet() {
-    final controller = _boardSheetController;
-    if (controller != null) {
-      controller.close();
-      return;
-    }
-    final opened = _scaffoldKey.currentState?.showBottomSheet(
-      (_) => _BoardSheet(onClose: _toggleBoardSheetManually),
+  /// Shows the board as a modal sheet — blocks the rest of the screen like
+  /// any other sheet, dismissible only via its own close button — and stays
+  /// open until that happens; no timer, no auto-close. The returned future
+  /// completes once it's actually been closed, so callers can wait for the
+  /// player to be done looking at it before showing anything else.
+  Future<void> _openBoardSheet() {
+    if (_boardSheetOpen) return Future.value();
+    setState(() => _boardSheetOpen = true);
+    final closed = showModalBottomSheet<void>(
+      context: context,
+      isDismissible: false,
+      enableDrag: false,
+      isScrollControlled: true,
+      builder: (sheetContext) {
+        _boardSheetContext = sheetContext;
+        return _BoardSheet(onClose: () => Navigator.of(sheetContext).pop());
+      },
     );
-    if (opened == null) return;
-    setState(() => _boardSheetController = opened);
-    opened.closed.whenComplete(() {
-      if (mounted) setState(() => _boardSheetController = null);
+    return closed.whenComplete(() {
+      _boardSheetContext = null;
+      if (mounted) setState(() => _boardSheetOpen = false);
     });
   }
 
@@ -725,13 +748,11 @@ class _GameScreenState extends State<GameScreen> {
               onPressed: _toggleBoardSheetManually,
               icon: Icon(
                 Icons.grid_view_rounded,
-                color: _boardSheetController == null
-                    ? null
-                    : Theme.of(context).colorScheme.primary,
+                color: _boardSheetOpen
+                    ? Theme.of(context).colorScheme.primary
+                    : null,
               ),
-              tooltip: _boardSheetController == null
-                  ? 'Show board'
-                  : 'Hide board',
+              tooltip: _boardSheetOpen ? 'Hide board' : 'Show board',
             ),
           IconButton(
             onPressed: _showRoomInfo,
@@ -1164,9 +1185,6 @@ class _GameScreenState extends State<GameScreen> {
 class _BoardSheet extends StatelessWidget {
   const _BoardSheet({required this.onClose});
 
-  // Persistent (non-modal) bottom sheets aren't on the Navigator stack —
-  // there's no route to pop — so closing goes through the controller in
-  // [_GameScreenState] instead.
   final VoidCallback onClose;
 
   @override
@@ -1358,19 +1376,18 @@ class _DiceSheetState extends State<_DiceSheet> {
                   ?.copyWith(fontWeight: FontWeight.w800),
             ),
             const SizedBox(height: 16),
-            if (session.canRoll || _rolling)
-              FilledButton.icon(
-                onPressed: _rolling ? null : () => _roll(session),
-                icon: const Icon(Icons.casino_rounded),
-                label: const Text('Roll'),
-              )
-            else
+            if (!_rolling)
               Text(
-                session.isMyTurn
-                    ? 'Take your actions, then end your turn.'
-                    : turnPlayer == null
-                        ? ''
-                        : "It's ${turnPlayer.name}'s turn to roll.",
+                roll != null &&
+                        roll.isDouble &&
+                        roll.playerId == session.myPlayerId &&
+                        session.canRoll
+                    ? 'Doubles! Close this and roll again.'
+                    : session.isMyTurn
+                        ? 'Take your actions, then end your turn.'
+                        : turnPlayer == null
+                            ? ''
+                            : "It's ${turnPlayer.name}'s turn to roll.",
                 textAlign: TextAlign.center,
                 style: textTheme.bodySmall
                     ?.copyWith(color: scheme.onSurfaceVariant),
