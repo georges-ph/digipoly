@@ -114,10 +114,16 @@ board — boards with different names/currencies/properties must all work.
   anytime, no turn order, as long as it beats the current bid and they can
   afford it; anyone can close it, selling to the top bidder at their bid
   (skips the "must be standing on it" check, same as any explicit-price
-  buy) or cancelling if nobody bid. State lives server-side only
-  (`GameServer._auctions`, `PropertyAuction` model) — not persisted to the
-  DB, but replayed to (re)connecting clients via the snapshot, so a table
-  restart or reconnect doesn't need to restart mid-auction. Wire:
+  buy) or cancelling if nobody bid — **except the leading bidder
+  themselves**, who the server refuses to let close their own auction (a
+  confirmation dialog on the client, plus a hard server-side check): with
+  no guard, anyone could start an auction, bid low once, and immediately
+  sell it to themselves before anyone else had a chance to bid. Someone
+  else at the table has to close it (cancelling with no bids at all is
+  still open to anyone, including the starter). State lives server-side
+  only (`GameServer._auctions`, `PropertyAuction` model) — not persisted to
+  the DB, but replayed to (re)connecting clients via the snapshot, so a
+  table restart or reconnect doesn't need to restart mid-auction. Wire:
   `startAuction`/`placeBid`/`closeAuction` intents,
   `auctionStarted`/`auctionBid`/`auctionClosed`/`auctionRejected` events.
 - **Trades (property transfer)**: the owner hands a deed to another player
@@ -126,7 +132,10 @@ board — boards with different names/currencies/properties must all work.
   sold first, a mortgage travels with the property. Not turn-gated (trades
   happen anytime at the table). Wire: `transferProperty` intent; the
   `propertyChanged` broadcast carries the intent's `txId` so the sender's
-  pending future resolves (transfers book no transaction).
+  pending future resolves, alongside a $0 `TransactionType.transfer`
+  logged in the activity feed (the only transaction type that never moves
+  money — it exists purely as a record of who got what). The recipient
+  also gets a "Property received" popup wherever they're looking.
 - **Mortgages**: the owner mortgages a property from its sheet — the bank
   pays `mortgageValue`; while mortgaged no rent is due (computeRent
   rejects, visitors see a "Mortgaged" note, list shows a badge), streets
@@ -186,11 +195,27 @@ board — boards with different names/currencies/properties must all work.
   someone else is still a physical/manual affair, like a property trade's
   cash side) — all candidates for later.
 - The **bank** is account id `"bank"` with infinite money; anyone may
-  trigger bank payouts (like trusting the physical banker).
+  trigger bank payouts (like trusting the physical banker) — every device
+  gets a heads-up (a top banner) the moment someone else collects, since
+  it's the one action any player can use to hand themselves an arbitrary
+  amount and there's otherwise no gate on it.
+- **Balances can go negative**: `GameEngine.applyPayment` no longer rejects
+  a payment the payer can't fully cover — tax, rent, card charges and the
+  jail fine all go through regardless, since there's no bankruptcy flow to
+  fall back to and a payment that just silently fails could get the game
+  stuck (land on a tax you can't pay; a rent an owner asks for that you
+  can't pay next turn). The payer owes the difference until they mortgage
+  or sell something to catch up. Only applies to payments that pass
+  through `applyPayment` — buying a property, building, and auction bids
+  still have their own "can you afford it" checks and stay blocked, since
+  those are voluntary spends, not something forcing a payment on you.
+  Negative balances render as `-$X` (`formatMoney`) and show in red
+  wherever a balance is displayed.
 
 ## Money & data model (`lib/models/`)
 
-All amounts are `int`. All models are hand-written JSON (`toJson`/`fromJson`)
+All amounts are `int` (negative allowed on `Player.balance` — see above).
+All models are hand-written JSON (`toJson`/`fromJson`)
 — **no codegen/build_runner, no dartz; errors use records**:
 `typedef Result<T>` in `models/result.dart` with `ok()`, `err()`, `.isOk`,
 `.error`, `.requireValue`.
@@ -217,7 +242,9 @@ All amounts are `int`. All models are hand-written JSON (`toJson`/`fromJson`)
   host/client, host address, myPlayerId), `GameSnapshot` (+ freeParkingPot,
   + running `auctions`).
 - `game_transaction.dart` — typed: payment, rent, purchase, salary, house,
-  request, card, mortgage, tax, freeParking; optional propertyId; note.
+  request, card, mortgage, tax, freeParking, transfer (a property handed
+  over directly — always $0, logged purely as an activity-feed record);
+  optional propertyId; note.
 - `property_ownership.dart` — propertyId → ownerId + houses (5 = hotel) +
   mortgaged.
 - `property_auction.dart` — `PropertyAuction` (propertyId, startedBy,
@@ -349,7 +376,12 @@ unbound-playerId gate).
 Flat layout: `lib/screens`, `lib/widgets`, `lib/theme`, `lib/utils`.
 
 - `home_screen` → `games_tab` (games list; "Live" badge = actually connected
-  now; tapping opens instantly and connects in background; "Watch a room's
+  right now for whichever game this device is currently in, **or** — for
+  every other saved game — its last-known host answering a quick, bounded
+  TCP probe (`_probeReachability`, same idea `discovery_service` already
+  uses for mDNS-found rooms), run on load and on pull-to-refresh, so a game
+  hosted elsewhere shows live without having to be opened first; tapping
+  opens instantly and connects in background; "Watch a room's
   dashboard" connects read-only as a spectator instead — see Spectator
   mode — and lands on `dashboard_screen` without adding anything to this
   list) + `boards_tab`
@@ -367,19 +399,21 @@ Flat layout: `lib/screens`, `lib/widgets`, `lib/theme`, `lib/utils`.
   names, accent ring = current turn, long-press → send/request/payment
   card), properties summary, activity teaser (10) → `activity_screen`
   (full). On boards with a curated layout, an app-bar toggle
-  (`widgets/ring_board.dart`-backed `BoardLayoutView` in a non-modal
-  `showBottomSheet` panel, so it doesn't block the rest of the screen or
-  dismiss on an outside tap) shows/hides the board on demand, and it also
-  **pops up automatically on any roll** (`GameProvider.diceRolls` stream —
-  every device sees every roll, so token movement is visible wherever a
-  player is looking) if it isn't already open, and **landing on an
-  ownable square auto-opens that property's sheet** (see the game-rules
-  bullet above). An auto-opened board **auto-closes** once that roll's
-  popup chain is done (my own roll: once dice/card/property popups all
-  resolve, via `_rollUiChain`; someone else's roll: after a few seconds,
-  since there's no popup chain of mine to hook onto) — `_boardOpenedAutomatically`
-  tracks this so a board the player pinned open via the app-bar toggle is
-  never auto-closed out from under them. Any running auction shows as an `AuctionCard` above the
+  (`widgets/ring_board.dart`-backed `BoardLayoutView` in a **modal**
+  `showModalBottomSheet`, `isDismissible: false` — blocks the rest of the
+  screen like any other sheet, closable only via its own close button, not
+  by tapping outside) shows/hides the board on demand, and it also **pops
+  up automatically on any roll** (`GameProvider.diceRolls` stream — every
+  device sees every roll, so token movement is visible wherever a player is
+  looking) if it isn't already open. It stays open until whoever's looking
+  at it closes it themselves — no timer, no auto-close on any device. For
+  my own roll, the popup order is dice result → board (waits for me to
+  close it) → landed property's sheet (`_afterRollReveal`, chained on
+  `_rollUiChain`), so the board actually gets seen instead of being
+  replaced immediately by the next popup. A card that doesn't move the
+  drawer (money, jail, repairs) skips the property re-check — only a "go
+  to X"/"go back N" card re-opens it, since only those actually change
+  where the token is standing. Any running auction shows as an `AuctionCard` above the
   roll/end-turn row, visible to the whole table regardless of turn.
   **Responsive**: ≥900px
   fills the whole window — banking column (flex 7, 8-column quick actions)
@@ -405,7 +439,8 @@ Flat layout: `lib/screens`, `lib/widgets`, `lib/theme`, `lib/utils`.
   `utils/board_ring.dart`'s `ringCells`, corners resolving to their row's
   edge since they aren't ownable and carry no band anyway) — like a real
   board rather than a plain top-of-tile strip. Tapping an ownable square opens
-  `properties_screen` (`openPropertyId`). `RingBoard` renders
+  its sheet directly via `showPropertySheet` (see below) — not the full
+  Properties list. `RingBoard` renders
   **rectangular** edge squares (tall/narrow on top & bottom, wide/short on
   the sides, like a real board) with big square corners rather than
   forcing every square to the same small square, scaled to fit the
@@ -417,7 +452,18 @@ Flat layout: `lib/screens`, `lib/widgets`, `lib/theme`, `lib/utils`.
 - `properties_screen` — search, ownership list (ownable kinds only —
   specials live in the board view, not here), per-property sheet (rent
   table, buy/pay-rent/build with **confirmation dialogs**, errors shown
-  inside the sheet, NFC write). An unowned property with no auction shows
+  inside the sheet). The sheet itself — buy/pay-rent/build, mortgage,
+  transfer, and (only for the owner, when NFC is available) a hint that
+  another player can tap their card here to pay rent — is
+  `showPropertySheet(context, propertyId:, nfcAvailable:)`, a top-level
+  function any screen can call directly rather than going through this
+  list: `game_screen` uses it for landings, NFC taps, and tapping a square
+  on the board popup, and `dashboard_screen` for tapping a square there
+  too — none of them navigate through this screen first anymore, only
+  browsing the full list ("View all") actually opens it. Registering a
+  physical NFC card for a property is a separate, explicit icon in this
+  screen's own app bar, only relevant while actually browsing the list.
+  An unowned property with no auction shows
   Buy plus, for whoever is actually standing on it on their turn, an explicit
   **"Decline — start an auction"** button (the official rule: declining a
   landing forces an auction rather than leaving it unowned indefinitely) —
@@ -427,6 +473,11 @@ Flat layout: `lib/screens`, `lib/widgets`, `lib/theme`, `lib/utils`.
 - `send_money_screen` — modes pay/collect/request; recipient bubbles; keypad
   (`00` appends atomically); request mode shows the target's balance and
   blocks over-asking; NFC tap-to-pay (amount first → tap card → confirm).
+  Paying a specific player (not collecting, not requesting) confirms with a
+  dialog before the money actually moves, same as NFC tap-to-pay already
+  did — collecting from the bank stays one-tap (it's already flagged to
+  the rest of the table as it happens) and a request doesn't move money
+  until the other side accepts it.
 - `dashboard_screen` — table-wide view for big screens (players grid, turn +
   dice banner, running `AuctionCard`s, shared activity feed, and the board
   view when the board has a layout). Reachable either as a normal player
@@ -459,12 +510,27 @@ Flat layout: `lib/screens`, `lib/widgets`, `lib/theme`, `lib/utils`.
   who's leading, bid box, close button — read-only for spectators),
   `amount_keypad`, `section_header`, `empty_state`.
 - Theme (`app_theme.dart`): violet fintech accent #635BFF, hero gradient,
-  radius 22, light+dark, **platform font only** (no google_fonts —
-  offline + flicker), `FloatingLabelBehavior.always` (narrow numeric fields
+  radius 22, light+dark, **Inter**, bundled as a local asset
+  (`assets/fonts/InterVariable.ttf`, `pubspec.yaml` `fonts:`) rather than
+  google_fonts: a runtime download would re-layout the app whenever a
+  weight arrives (visible flicker) and fail with no internet, but the
+  platform-default font Flutter otherwise falls back to isn't actually
+  consistent everywhere — web has no Roboto of its own and was rendering
+  a generic browser sans-serif, looking different from every native
+  build. A bundled asset fixes that without a runtime fetch.
+  `FloatingLabelBehavior.always` (narrow numeric fields
   clip full-size labels). Money formatting via `utils/formatting.dart`
-  (intl): formatMoney/formatSignedMoney/formatWhen/formatDay. All
+  (intl): formatMoney/formatSignedMoney/formatWhen/formatDay
+  (`formatMoney` renders a negative balance as `-$X`, not `$-X`). All
   snackbars go through `utils/snack.dart` (`showSnack`/`showSnackWith`):
-  the previous bar is removed instantly, 2s duration — never queue.
+  the previous bar is removed instantly, 2s duration — never queue. That's
+  for direct feedback on an action the viewer themselves just took, though
+  — it anchors to the page's own Scaffold, so it renders *behind* anything
+  pushed on top (a modal sheet, a dialog). For ambient notices about
+  something someone *else* just did (a bank collection, a payment landing
+  in my account), `utils/top_banner.dart`'s `showTopBanner` inserts
+  straight into the root `Overlay` instead, so it stays visible regardless
+  of what else is open.
 
 ## NFC (Android)
 
