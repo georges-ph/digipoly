@@ -32,6 +32,12 @@ typedef CardDrawEvent = ({
   int? chargedAmount,
 });
 
+typedef PropertyTransferEvent = ({
+  String propertyId,
+  String fromId,
+  String toId,
+});
+
 /// The active game session on this device.
 ///
 /// Whether hosting or joining, the device always participates through a
@@ -88,6 +94,7 @@ class GameProvider extends ChangeNotifier {
   final _errors = StreamController<String>.broadcast();
   final _cardDraws = StreamController<CardDrawEvent>.broadcast();
   final _diceRolls = StreamController<DiceRoll>.broadcast();
+  final _propertyTransfers = StreamController<PropertyTransferEvent>.broadcast();
   String? _outgoingRequestId;
 
   // ------------------------------------------------------------- Getters
@@ -101,6 +108,11 @@ class GameProvider extends ChangeNotifier {
   /// Every dice roll anyone makes — every device sees it, so the board can
   /// pop up automatically wherever players are looking.
   Stream<DiceRoll> get diceRolls => _diceRolls.stream;
+
+  /// Every property handed from one player to another — the recipient's
+  /// device uses this to pop up a "you were given X" notice.
+  Stream<PropertyTransferEvent> get propertyTransfers =>
+      _propertyTransfers.stream;
 
   bool get hasActiveSession => _record != null && _client != null;
   GameRecord? get record => _record;
@@ -803,6 +815,22 @@ class GameProvider extends ChangeNotifier {
           if (record != null && _persistLocally) {
             _db.upsertOwnerships(record.game.id, [ownership]);
           }
+          final txJson =
+              message.payload['transaction'] as Map<String, dynamic>?;
+          if (txJson != null) {
+            final tx = GameTransaction.fromJson(txJson);
+            if (!_transactions.any((t) => t.id == tx.id)) {
+              _transactions.add(tx);
+              if (record != null && _persistLocally) {
+                _db.insertTransactions(record.game.id, [tx]);
+              }
+            }
+            _propertyTransfers.add((
+              propertyId: tx.propertyId ?? ownership.propertyId,
+              fromId: tx.fromId,
+              toId: tx.toId,
+            ));
+          }
           notifyListeners();
         }
       case MessageType.transactionNoteUpdated:
@@ -1114,6 +1142,7 @@ class GameProvider extends ChangeNotifier {
     _errors.close();
     _cardDraws.close();
     _diceRolls.close();
+    _propertyTransfers.close();
     super.dispose();
   }
 }

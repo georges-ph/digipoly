@@ -20,7 +20,12 @@ enum TransactionType {
   tax,
 
   /// Landing on Free Parking pays out the accumulated pot.
-  freeParking;
+  freeParking,
+
+  /// A property handed to another player directly (no money moves — any
+  /// cash for the deal is a separate, normal [payment]). Logged at $0
+  /// purely so the trade shows up in the activity feed.
+  transfer;
 
   static TransactionType fromName(String name) =>
       TransactionType.values.firstWhere(

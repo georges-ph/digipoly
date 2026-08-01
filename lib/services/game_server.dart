@@ -950,8 +950,27 @@ class GameServer {
     final ownership = _ownerships[propertyId]!.copyWith(ownerId: toId);
     _ownerships[propertyId] = ownership;
     _db.upsertOwnerships(_game!.id, [ownership]);
+
+    // No money moves, but the trade itself is worth a line in the activity
+    // feed — logged at $0 rather than going through _applyTransaction
+    // (which rejects non-positive amounts, since every other transaction
+    // type really does move money).
+    final tx = GameTransaction(
+      id: const Uuid().v4(),
+      gameId: _game!.id,
+      fromId: senderId,
+      toId: toId,
+      amount: 0,
+      type: TransactionType.transfer,
+      propertyId: propertyId,
+      timestamp: DateTime.now(),
+    );
+    _transactions.add(tx);
+    _db.insertTransactions(_game!.id, [tx]);
+
     _broadcast(WsMessage(MessageType.propertyChanged, {
       'ownership': ownership.toJson(),
+      'transaction': tx.toJson(),
       'txId': txId,
     }));
   }
