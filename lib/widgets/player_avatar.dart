@@ -43,7 +43,7 @@ class PlayerAvatar extends StatelessWidget {
         color: color,
         shape: BoxShape.circle,
         border: highlight
-            ? Border.all(color: AppColors.accent, width: 2.5)
+            ? Border.all(color: AppColors.accent, width: 4)
             : null,
       ),
       alignment: Alignment.center,
