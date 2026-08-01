@@ -50,6 +50,7 @@ class _GameScreenState extends State<GameScreen> {
   StreamSubscription<CardDrawEvent>? _cardDrawSub;
   StreamSubscription<DiceRoll>? _diceRollSub;
   StreamSubscription<PropertyTransferEvent>? _transferSub;
+  StreamSubscription<BankCollectionEvent>? _bankCollectionSub;
   final _nfc = NfcService.instance;
   GameProvider? _session;
   bool _requestDialogOpen = false;
@@ -150,6 +151,19 @@ class _GameScreenState extends State<GameScreen> {
         ),
       );
     });
+    // Anyone can collect from the bank — flag it to the rest of the table
+    // as it happens instead of leaving it to surface later in Activity.
+    _bankCollectionSub = session.bankCollections.listen((event) {
+      if (!mounted || event.playerId == _session?.myPlayerId) return;
+      final session = _session;
+      if (session == null) return;
+      final board = session.game?.board;
+      if (board == null) return;
+      _snack(
+        '${session.accountName(event.playerId)} collected '
+        '${formatMoney(event.amount, board.currencySymbol)} from the bank',
+      );
+    });
     // Money requests pop as a dialog wherever the player currently is.
     session.addListener(_maybeShowRequestDialog);
     WidgetsBinding.instance.addPostFrameCallback(
@@ -169,6 +183,7 @@ class _GameScreenState extends State<GameScreen> {
     _cardDrawSub?.cancel();
     _diceRollSub?.cancel();
     _transferSub?.cancel();
+    _bankCollectionSub?.cancel();
     _session?.removeListener(_maybeShowRequestDialog);
     _nfc.stopWatch();
     super.dispose();

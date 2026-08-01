@@ -38,6 +38,8 @@ typedef PropertyTransferEvent = ({
   String toId,
 });
 
+typedef BankCollectionEvent = ({String playerId, int amount});
+
 /// The active game session on this device.
 ///
 /// Whether hosting or joining, the device always participates through a
@@ -95,6 +97,7 @@ class GameProvider extends ChangeNotifier {
   final _cardDraws = StreamController<CardDrawEvent>.broadcast();
   final _diceRolls = StreamController<DiceRoll>.broadcast();
   final _propertyTransfers = StreamController<PropertyTransferEvent>.broadcast();
+  final _bankCollections = StreamController<BankCollectionEvent>.broadcast();
   String? _outgoingRequestId;
 
   // ------------------------------------------------------------- Getters
@@ -113,6 +116,11 @@ class GameProvider extends ChangeNotifier {
   /// device uses this to pop up a "you were given X" notice.
   Stream<PropertyTransferEvent> get propertyTransfers =>
       _propertyTransfers.stream;
+
+  /// Every free-form "Collect from bank" payment — anyone can trigger a
+  /// bank payout, so this is what lets the rest of the table actually
+  /// notice it happened instead of finding out later in the activity feed.
+  Stream<BankCollectionEvent> get bankCollections => _bankCollections.stream;
 
   bool get hasActiveSession => _record != null && _client != null;
   GameRecord? get record => _record;
@@ -1061,6 +1069,13 @@ class GameProvider extends ChangeNotifier {
         payload['freeParkingPot'] as int? ?? _freeParkingPot;
     if (!_transactions.any((t) => t.id == tx.id)) {
       _transactions.add(tx);
+      // A free-form bank payout (not salary/card/Free Parking, which have
+      // their own transaction types) — the one case where any player can
+      // hand themselves an arbitrary amount, so it's worth flagging to
+      // everyone else rather than only showing up in the activity feed.
+      if (tx.type == TransactionType.payment && tx.fromId == Player.bankId) {
+        _bankCollections.add((playerId: tx.toId, amount: tx.amount));
+      }
     }
 
     _record = record.copyWith(lastPlayedAt: DateTime.now());
@@ -1143,6 +1158,7 @@ class GameProvider extends ChangeNotifier {
     _cardDraws.close();
     _diceRolls.close();
     _propertyTransfers.close();
+    _bankCollections.close();
     super.dispose();
   }
 }
