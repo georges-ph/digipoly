@@ -356,7 +356,12 @@ Flat layout: `lib/screens`, `lib/widgets`, `lib/theme`, `lib/utils`.
   every device sees every roll, so token movement is visible wherever a
   player is looking) if it isn't already open, and **landing on an
   ownable square auto-opens that property's sheet** (see the game-rules
-  bullet above). Any running auction shows as an `AuctionCard` above the
+  bullet above). An auto-opened board **auto-closes** once that roll's
+  popup chain is done (my own roll: once dice/card/property popups all
+  resolve, via `_rollUiChain`; someone else's roll: after a few seconds,
+  since there's no popup chain of mine to hook onto) — `_boardOpenedAutomatically`
+  tracks this so a board the player pinned open via the app-bar toggle is
+  never auto-closed out from under them. Any running auction shows as an `AuctionCard` above the
   roll/end-turn row, visible to the whole table regardless of turn.
   **Responsive**: ≥900px
   fills the whole window — banking column (flex 7, 8-column quick actions)

@@ -53,6 +53,14 @@ class _GameScreenState extends State<GameScreen> {
   GameProvider? _session;
   bool _requestDialogOpen = false;
   PersistentBottomSheetController? _boardSheetController;
+  // Whether the currently-open board sheet opened itself (a roll) rather
+  // than the player pinning it open via the app-bar toggle — only an
+  // auto-opened sheet auto-closes; a manually opened one stays until the
+  // player closes it themselves.
+  bool _boardOpenedAutomatically = false;
+  // Someone else's roll has no popup chain of mine to hook a close onto —
+  // give it a few seconds to actually be seen, then close it back up.
+  Timer? _boardAutoCloseTimer;
 
   // My own roll can trigger up to three popups in a row (the dice sheet
   // itself, a card reveal if I landed on Chance/Chest, and the auto-opened
@@ -97,22 +105,35 @@ class _GameScreenState extends State<GameScreen> {
     // wherever a player is looking — only on boards with a curated layout,
     // and only if it isn't already open. Non-modal, so it's fine to show
     // immediately rather than queuing behind the dice/card popups above.
+    // It auto-closes once that movement has actually been seen (see below)
+    // instead of staying pinned open indefinitely.
     _diceRollSub = session.diceRolls.listen((roll) {
       if (!mounted) return;
+      final isMine = roll.playerId == _session?.myPlayerId;
       if (_boardSheetController == null &&
           (_session?.game?.board.goIndex ?? -1) >= 0) {
+        _boardOpenedAutomatically = true;
         _toggleBoardSheet();
       }
       // Only my own roll moves my own token — offer to buy/pay rent/build
       // right away instead of making the player dig through Properties.
       // Skipped when a card for this same roll already scheduled its own
       // check (see above) so the property sheet doesn't pop up twice.
-      if (roll.playerId == _session?.myPlayerId) {
+      if (isMine) {
         if (_cardHandledThisRoll) {
           _cardHandledThisRoll = false;
         } else {
           _enqueueRollUi(_maybeOpenLandedProperty);
         }
+        // My own roll has a real end to its popup chain (dice → card →
+        // property) — close the board once that chain is fully done.
+        _enqueueRollUi(_closeBoardSheetIfAutoOpened);
+      } else {
+        // Someone else's roll has no chain of mine to hook a close onto —
+        // just give it a few seconds to be seen.
+        _boardAutoCloseTimer?.cancel();
+        _boardAutoCloseTimer =
+            Timer(const Duration(seconds: 4), _closeBoardSheetIfAutoOpened);
       }
     });
     // Money requests pop as a dialog wherever the player currently is.
@@ -133,9 +154,28 @@ class _GameScreenState extends State<GameScreen> {
     _errorSub?.cancel();
     _cardDrawSub?.cancel();
     _diceRollSub?.cancel();
+    _boardAutoCloseTimer?.cancel();
     _session?.removeListener(_maybeShowRequestDialog);
     _nfc.stopWatch();
     super.dispose();
+  }
+
+  /// The app-bar toggle and the sheet's own close button: an explicit,
+  /// player-driven open/close, not tied to any roll — pins it open (or
+  /// closed) regardless of the auto-close behavior below.
+  void _toggleBoardSheetManually() {
+    _boardAutoCloseTimer?.cancel();
+    _boardOpenedAutomatically = false;
+    _toggleBoardSheet();
+  }
+
+  /// Closes the board sheet if (and only if) it's still open from an
+  /// auto-open — never closes one the player pinned open themselves.
+  void _closeBoardSheetIfAutoOpened() {
+    if (_boardOpenedAutomatically && _boardSheetController != null) {
+      _toggleBoardSheet();
+    }
+    _boardOpenedAutomatically = false;
   }
 
   /// Shows/hides the board as a non-modal panel docked to the bottom of the
@@ -148,7 +188,7 @@ class _GameScreenState extends State<GameScreen> {
       return;
     }
     final opened = _scaffoldKey.currentState?.showBottomSheet(
-      (_) => _BoardSheet(onClose: _toggleBoardSheet),
+      (_) => _BoardSheet(onClose: _toggleBoardSheetManually),
     );
     if (opened == null) return;
     setState(() => _boardSheetController = opened);
@@ -680,7 +720,7 @@ class _GameScreenState extends State<GameScreen> {
         actions: [
           if (game.board.goIndex >= 0)
             IconButton(
-              onPressed: _toggleBoardSheet,
+              onPressed: _toggleBoardSheetManually,
               icon: Icon(
                 Icons.grid_view_rounded,
                 color: _boardSheetController == null
