@@ -169,8 +169,7 @@ class _BoardEditorScreenState extends State<BoardEditorScreen> {
                 const SizedBox(height: 12),
                 Row(
                   children: [
-                    SizedBox(
-                      width: 110,
+                    Expanded(
                       child: TextField(
                         controller: _currencyController,
                         maxLength: 4,
@@ -195,7 +194,11 @@ class _BoardEditorScreenState extends State<BoardEditorScreen> {
                         ),
                       ),
                     ),
-                    const SizedBox(width: 12),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
                     Expanded(
                       child: TextField(
                         controller: _salaryController,
@@ -208,19 +211,20 @@ class _BoardEditorScreenState extends State<BoardEditorScreen> {
                         ),
                       ),
                     ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                SizedBox(
-                  width: 160,
-                  child: TextField(
-                    controller: _jailFineController,
-                    keyboardType: TextInputType.number,
-                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                    decoration: const InputDecoration(
-                      labelText: 'Jail fine',
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: TextField(
+                        controller: _jailFineController,
+                        keyboardType: TextInputType.number,
+                        inputFormatters: [
+                          FilteringTextInputFormatter.digitsOnly
+                        ],
+                        decoration: const InputDecoration(
+                          labelText: 'Jail fine',
+                        ),
+                      ),
                     ),
-                  ),
+                  ],
                 ),
                 const SizedBox(height: 20),
                 SectionHeader(
