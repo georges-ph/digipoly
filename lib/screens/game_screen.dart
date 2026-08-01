@@ -54,6 +54,25 @@ class _GameScreenState extends State<GameScreen> {
   bool _requestDialogOpen = false;
   PersistentBottomSheetController? _boardSheetController;
 
+  // My own roll can trigger up to three popups in a row (the dice sheet
+  // itself, a card reveal if I landed on Chance/Chest, and the auto-opened
+  // property sheet) — chaining them here instead of firing independently
+  // guarantees they show one at a time, in that order, instead of racing:
+  // without this, the card/property reactions used to land on top of the
+  // still-open dice sheet before I'd even seen the roll.
+  Future<void> _rollUiChain = Future.value();
+  // A card draw that's part of my own roll already re-checks the landed
+  // square once its dialog closes — set so the roll's own listener doesn't
+  // also trigger a second, redundant property auto-open for the same square.
+  bool _cardHandledThisRoll = false;
+
+  void _enqueueRollUi(FutureOr<void> Function() action) {
+    _rollUiChain = _rollUiChain.then((_) {
+      if (!mounted) return null;
+      return action();
+    });
+  }
+
   @override
   void initState() {
     super.initState();
@@ -65,17 +84,19 @@ class _GameScreenState extends State<GameScreen> {
     });
     _cardDrawSub = session.cardDraws.listen((event) {
       if (!mounted) return;
-      _showCardDialog(event).then((_) {
-        // A "go to X" card moved me — offer the same landing actions as a
-        // normal roll once the reveal dialog is out of the way.
-        if (mounted && event.playerId == _session?.myPlayerId) {
-          _maybeOpenLandedProperty();
-        }
-      });
+      final isMine = event.playerId == _session?.myPlayerId;
+      if (isMine) _cardHandledThisRoll = true;
+      _enqueueRollUi(() => _showCardDialog(event).then((_) {
+            // A "go to X" card moved me — offer the same landing actions as
+            // a normal roll once the reveal dialog is out of the way.
+            if (mounted && isMine) _maybeOpenLandedProperty();
+            _cardHandledThisRoll = false;
+          }));
     });
     // Every roll (anyone's) pops the board up so token movement is visible
     // wherever a player is looking — only on boards with a curated layout,
-    // and only if it isn't already open.
+    // and only if it isn't already open. Non-modal, so it's fine to show
+    // immediately rather than queuing behind the dice/card popups above.
     _diceRollSub = session.diceRolls.listen((roll) {
       if (!mounted) return;
       if (_boardSheetController == null &&
@@ -84,7 +105,15 @@ class _GameScreenState extends State<GameScreen> {
       }
       // Only my own roll moves my own token — offer to buy/pay rent/build
       // right away instead of making the player dig through Properties.
-      if (roll.playerId == _session?.myPlayerId) _maybeOpenLandedProperty();
+      // Skipped when a card for this same roll already scheduled its own
+      // check (see above) so the property sheet doesn't pop up twice.
+      if (roll.playerId == _session?.myPlayerId) {
+        if (_cardHandledThisRoll) {
+          _cardHandledThisRoll = false;
+        } else {
+          _enqueueRollUi(_maybeOpenLandedProperty);
+        }
+      }
     });
     // Money requests pop as a dialog wherever the player currently is.
     session.addListener(_maybeShowRequestDialog);
@@ -347,10 +376,15 @@ class _GameScreenState extends State<GameScreen> {
   }
 
   void _rollDice() {
-    showModalBottomSheet<void>(
+    final closed = showModalBottomSheet<void>(
       context: context,
       builder: (_) => const _DiceSheet(),
     );
+    // Any card/property popup triggered by this roll is enqueued onto
+    // _rollUiChain as its broadcast arrives (see initState) — queuing this
+    // sheet's own dismissal first guarantees those wait their turn instead
+    // of surfacing on top of a dice result the player hasn't seen yet.
+    _enqueueRollUi(() => closed);
   }
 
   void _openReceive() {
