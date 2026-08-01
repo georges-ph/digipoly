@@ -703,6 +703,18 @@ class GameServer {
       return;
     }
 
+    // The leading bidder can't close their own auction — otherwise anyone
+    // could start one, bid low once, and immediately sell it to themselves
+    // before anybody else gets a chance to bid. Someone else at the table
+    // has to be the one to close it (cancelling with no bids is still fine
+    // for anyone, handled above).
+    if (senderId == bidderId) {
+      _auctions[propertyId] = auction;
+      _rejectAuction(senderId, propertyId,
+          'Someone else needs to close this — you\'re the leading bidder.');
+      return;
+    }
+
     final validated = GameEngine.validatePurchase(
       board: _game!.board,
       ownerships: _ownerships,

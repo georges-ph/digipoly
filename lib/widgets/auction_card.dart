@@ -209,16 +209,24 @@ class _AuctionCardState extends State<AuctionCard> {
             Align(
               alignment: Alignment.centerRight,
               child: TextButton(
-                onPressed: () => _confirmClose(
-                  session,
-                  bidderId: bidderId,
-                  bidderName: bidderName,
-                  currency: board.currencySymbol,
-                ),
+                // The leading bidder can't close their own auction — that
+                // would let them bid low once and sell it to themselves
+                // before anyone else gets a chance. Someone else at the
+                // table has to close it (the server enforces this too).
+                onPressed: iAmLeading
+                    ? null
+                    : () => _confirmClose(
+                          session,
+                          bidderId: bidderId,
+                          bidderName: bidderName,
+                          currency: board.currencySymbol,
+                        ),
                 child: Text(
                   bidderId == null
                       ? 'Cancel auction'
-                      : 'Close — sell to $bidderName',
+                      : iAmLeading
+                          ? "You're leading — someone else can close this"
+                          : 'Close — sell to $bidderName',
                 ),
               ),
             ),
