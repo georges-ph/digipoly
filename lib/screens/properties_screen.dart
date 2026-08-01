@@ -819,17 +819,30 @@ class _PropertySheetState extends State<_PropertySheet> {
             if (owner == null) ...[
               if (session.auctionFor(property.id) case final auction?)
                 AuctionCard(auction: auction)
-              else ...[
+              else if (canResolve && onThisSquare) ...[
+                // Standing here, my turn: the official rule — buy it, or
+                // decline and it goes to auction, not just left unowned.
                 FilledButton.icon(
-                  onPressed: canResolve && !_busy && onThisSquare
-                      ? _buyFlow
-                      : null,
+                  onPressed: !_busy ? _buyFlow : null,
                   icon: const Icon(Icons.shopping_bag_outlined),
                   label: Text(
                     'Buy for ${formatMoney(property.price, currency)}',
                   ),
                 ),
-                if (canResolve && !onThisSquare) ...[
+                const SizedBox(height: 8),
+                OutlinedButton(
+                  onPressed: !_busy ? _startAuction : null,
+                  child: const Text('Decline — start an auction'),
+                ),
+              ] else ...[
+                FilledButton.icon(
+                  onPressed: null,
+                  icon: const Icon(Icons.shopping_bag_outlined),
+                  label: Text(
+                    'Buy for ${formatMoney(property.price, currency)}',
+                  ),
+                ),
+                if (canResolve) ...[
                   const SizedBox(height: 6),
                   Center(
                     child: Text(
@@ -842,7 +855,8 @@ class _PropertySheetState extends State<_PropertySheet> {
                   ),
                 ],
                 // Auctions happen out loud at the table — the winner
-                // needn't be standing here, so anyone can start one.
+                // needn't be standing here, so anyone can start one even
+                // when nobody's actively resolving a landing on it.
                 Center(
                   child: TextButton(
                     onPressed: session.connection == ClientStatus.connected &&

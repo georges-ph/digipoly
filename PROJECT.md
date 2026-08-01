@@ -103,7 +103,12 @@ board — boards with different names/currencies/properties must all work.
   multiplier × dice (uses the payer's own in-app roll automatically).
 - **Live auctions**: any connected player can start an auction for an
   unowned property from its sheet ("Start an auction") — not turn-gated,
-  since auctions arise on other players' turns. Everyone connected sees a
+  since auctions arise on other players' turns. The player actually
+  standing on an unowned square, on their turn, sees this as an explicit
+  **"Decline — start an auction"** button instead (the official rule:
+  declining a landing sends it to auction, not just leaving it unowned
+  indefinitely) — everyone else still gets the plain link, since starting
+  one isn't tied to their own landing. Everyone connected sees a
   shared live `AuctionCard` (game screen, dashboard, and the property
   sheet) with the current bid and who's leading; anyone can raise it
   anytime, no turn order, as long as it beats the current bid and they can
@@ -413,8 +418,12 @@ Flat layout: `lib/screens`, `lib/widgets`, `lib/theme`, `lib/utils`.
   specials live in the board view, not here), per-property sheet (rent
   table, buy/pay-rent/build with **confirmation dialogs**, errors shown
   inside the sheet, NFC write). An unowned property with no auction shows
-  Buy plus "Start an auction"; once one's running its `AuctionCard`
-  replaces both.
+  Buy plus, for whoever is actually standing on it on their turn, an explicit
+  **"Decline — start an auction"** button (the official rule: declining a
+  landing forces an auction rather than leaving it unowned indefinitely) —
+  anyone else just sees a plain "Start an auction" link instead, since
+  there's no landing of theirs to decline. Once one's running its
+  `AuctionCard` replaces both.
 - `send_money_screen` — modes pay/collect/request; recipient bubbles; keypad
   (`00` appends atomically); request mode shows the target's balance and
   blocks over-asking; NFC tap-to-pay (amount first → tap card → confirm).
