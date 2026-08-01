@@ -811,8 +811,15 @@ class _GameScreenState extends State<GameScreen> {
                       ),
                     ),
                     const SizedBox(width: 10),
+                    // Bare in a Row (no Expanded): the theme's default
+                    // minimumSize is Size.fromHeight (infinite width), so
+                    // both buttons need an explicit finite-width override
+                    // here or they crash the whole Row's layout.
                     if ((session.me?.jailCards ?? 0) > 0) ...[
                       OutlinedButton(
+                        style: OutlinedButton.styleFrom(
+                          minimumSize: const Size(0, 40),
+                        ),
                         onPressed:
                             session.canUseJailCard ? _useJailCard : null,
                         child: const Text('Use card'),
@@ -820,6 +827,9 @@ class _GameScreenState extends State<GameScreen> {
                       const SizedBox(width: 8),
                     ],
                     FilledButton(
+                      style: FilledButton.styleFrom(
+                        minimumSize: const Size(0, 40),
+                      ),
                       onPressed:
                           session.canPayJailFine ? _payJailFine : null,
                       child: const Text('Pay'),

@@ -117,6 +117,10 @@ class _AuctionCardState extends State<AuctionCard> {
                 ),
                 const SizedBox(width: 8),
                 FilledButton(
+                  // The app theme's default minimumSize is Size.fromHeight
+                  // (infinite width, meant for full-width buttons) — fatal
+                  // for a button sitting directly in a Row without Expanded.
+                  style: FilledButton.styleFrom(minimumSize: const Size(0, 40)),
                   onPressed: () => _bid(session),
                   child: const Text('Bid'),
                 ),
