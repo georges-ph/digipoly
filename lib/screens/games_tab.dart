@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -26,6 +28,52 @@ class GamesTab extends StatefulWidget {
 }
 
 class _GamesTabState extends State<GamesTab> {
+  // "Live" for the game this device is actually connected to comes straight
+  // off GameProvider. For every *other* saved game, the only way to know
+  // whether its host is currently up is to ask — a quick, bounded TCP probe
+  // per record (same idea discovery_service already uses for mDNS-found
+  // rooms), so a game hosted elsewhere shows as live without having to be
+  // opened first. Keyed by game id.
+  final Map<String, bool> _reachable = {};
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _probeReachability();
+    });
+  }
+
+  Future<void> _probeReachability() async {
+    final session = context.read<GameProvider>();
+    final records = context.read<GamesProvider>().records;
+    await Future.wait(records.map((record) async {
+      // The currently-connected game already has a real answer and doesn't
+      // need a guess. Only client records carry a host to probe — a hosted
+      // game is only live if this device is actually running it right now.
+      if (record.game.id == session.record?.game.id) return;
+      final host = record.hostAddress;
+      final port = record.hostPort;
+      if (host == null || port == null) return;
+      final reachable = await _probe(host, port);
+      if (mounted) setState(() => _reachable[record.game.id] = reachable);
+    }));
+  }
+
+  Future<bool> _probe(String host, int port) async {
+    try {
+      final socket = await Socket.connect(
+        host,
+        port,
+        timeout: const Duration(seconds: 2),
+      );
+      socket.destroy();
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   Future<void> _openGame(GameRecord record) async {
     final session = context.read<GameProvider>();
     final messenger = ScaffoldMessenger.of(context);
@@ -145,18 +193,23 @@ class _GamesTabState extends State<GamesTab> {
                       'your wifi.',
                 )
               : RefreshIndicator(
-                  onRefresh: games.load,
+                  onRefresh: () => Future.wait(
+                    [games.load(), _probeReachability()],
+                  ),
                   child: ListView.separated(
                     padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
                     itemCount: games.records.length,
                     separatorBuilder: (_, _) => const SizedBox(height: 12),
                     itemBuilder: (context, index) {
                       final record = games.records[index];
-                      // "Live" means actually connected right now — a
-                      // session whose host has vanished is not live.
-                      final isLive = session.hasActiveSession &&
-                          session.record?.game.id == record.game.id &&
-                          session.connection == ClientStatus.connected;
+                      // "Live" means actually connected right now, or (for
+                      // every other saved game) its host answering a quick
+                      // reachability probe — a session whose host has
+                      // vanished either way is not live.
+                      final isLive = (session.hasActiveSession &&
+                              session.record?.game.id == record.game.id &&
+                              session.connection == ClientStatus.connected) ||
+                          _reachable[record.game.id] == true;
                       return _GameCard(
                         record: record,
                         balance: games.myBalanceIn(record),
