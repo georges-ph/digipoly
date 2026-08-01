@@ -61,14 +61,10 @@ class _PropertiesScreenState extends State<PropertiesScreen> {
   }
 
   Future<void> _openProperty(Property property) async {
-    final resolved = await showModalBottomSheet<bool>(
-      context: context,
-      isScrollControlled: true,
-      builder: (_) => _PropertySheet(
-        propertyId: property.id,
-        nfcAvailable: _nfcAvailable,
-        onWriteCard: () => _writeCard(property),
-      ),
+    final resolved = await showPropertySheet(
+      context,
+      propertyId: property.id,
+      nfcAvailable: _nfcAvailable,
     );
     // Buying or paying rent settles the square you landed on — return
     // straight to the game screen instead of leaving this list in the way.
@@ -118,19 +114,6 @@ class _PropertiesScreenState extends State<PropertiesScreen> {
       case null:
         _snack('Not a digipoly card.');
     }
-  }
-
-  Future<void> _writeCard(Property property) async {
-    final board = context.read<GameProvider>().game?.board;
-    if (board == null) return;
-
-    _showNfcWaitDialog('Hold an empty card near the device…');
-    final result = await _nfc.writeText(
-      NfcService.propertyPayload(boardId: board.id, propertyId: property.id),
-    );
-    if (mounted) Navigator.of(context).pop();
-    if (result.error == NfcService.cancelled) return;
-    _snack(result.isOk ? 'Card written: ${property.name}' : result.error!);
   }
 
   void _showNfcWaitDialog(String message) {
@@ -384,6 +367,70 @@ class _PropertyTile extends StatelessWidget {
 // ---------------------------------------------------------------------------
 // Property action sheet
 // ---------------------------------------------------------------------------
+
+/// Opens [propertyId]'s action sheet directly — buy, pay rent, manage
+/// buildings, register an NFC card — without navigating through the full
+/// Properties list first. Used by the game screen for landings, NFC taps
+/// and tapping a square on the board, as well as by [PropertiesScreen]
+/// itself when browsing the full list. Returns true if a buy/rent action
+/// completed inside the sheet, so the caller can react (e.g. dismiss
+/// whatever else led here).
+Future<bool?> showPropertySheet(
+  BuildContext context, {
+  required String propertyId,
+  required bool nfcAvailable,
+}) {
+  final nfc = NfcService.instance;
+
+  Future<void> writeCard() async {
+    final session = context.read<GameProvider>();
+    final board = session.game?.board;
+    final property = session.propertyById(propertyId);
+    if (board == null || property == null) return;
+
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => AlertDialog(
+        content: const Row(
+          children: [
+            SizedBox(
+              width: 24,
+              height: 24,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+            SizedBox(width: 16),
+            Expanded(child: Text('Hold an empty card near the device…')),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: nfc.cancel, child: const Text('Cancel')),
+        ],
+      ),
+    );
+    final result = await nfc.writeText(
+      NfcService.propertyPayload(boardId: board.id, propertyId: property.id),
+    );
+    if (context.mounted) Navigator.of(context).pop(); // close the wait dialog
+    if (result.error == NfcService.cancelled) return;
+    if (context.mounted) {
+      showSnack(
+        context,
+        result.isOk ? 'Card written: ${property.name}' : result.error!,
+      );
+    }
+  }
+
+  return showModalBottomSheet<bool>(
+    context: context,
+    isScrollControlled: true,
+    builder: (_) => _PropertySheet(
+      propertyId: propertyId,
+      nfcAvailable: nfcAvailable,
+      onWriteCard: writeCard,
+    ),
+  );
+}
 
 class _PropertySheet extends StatefulWidget {
   const _PropertySheet({

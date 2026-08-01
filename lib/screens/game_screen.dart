@@ -54,6 +54,7 @@ class _GameScreenState extends State<GameScreen> {
   StreamSubscription<BankCollectionEvent>? _bankCollectionSub;
   StreamSubscription<PaymentReceivedEvent>? _paymentReceivedSub;
   final _nfc = NfcService.instance;
+  bool _nfcAvailable = false;
   GameProvider? _session;
   bool _requestDialogOpen = false;
   // Whether the board sheet is currently showing, and the BuildContext of
@@ -188,7 +189,9 @@ class _GameScreenState extends State<GameScreen> {
       (_) => _maybeShowRequestDialog(),
     );
     _nfc.isAvailable().then((available) {
-      if (!mounted || !available) return;
+      if (!mounted) return;
+      setState(() => _nfcAvailable = available);
+      if (!available) return;
       // Keep a reader session open for the whole game: any Digipoly card
       // tapped just works, and Android's own tag UI stays out of the way.
       _nfc.startWatch(_onCardTapped);
@@ -245,7 +248,10 @@ class _GameScreenState extends State<GameScreen> {
       isScrollControlled: true,
       builder: (sheetContext) {
         _boardSheetContext = sheetContext;
-        return _BoardSheet(onClose: () => Navigator.of(sheetContext).pop());
+        return _BoardSheet(
+          onClose: () => Navigator.of(sheetContext).pop(),
+          nfcAvailable: _nfcAvailable,
+        );
       },
     );
     return closed.whenComplete(() {
@@ -356,11 +362,12 @@ class _GameScreenState extends State<GameScreen> {
     }
   }
 
-  void _openProperties({String? propertyId}) {
+  /// The "View all" link — browsing the full list is the one case that
+  /// should still navigate there, unlike a single known property (see
+  /// [showPropertySheet], used everywhere else in this screen).
+  void _openPropertiesList() {
     Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => PropertiesScreen(openPropertyId: propertyId),
-      ),
+      MaterialPageRoute(builder: (_) => const PropertiesScreen()),
     );
   }
 
@@ -380,7 +387,7 @@ class _GameScreenState extends State<GameScreen> {
     }
     final square = board.properties[position];
     if (!square.kind.isOwnable) return;
-    _openProperties(propertyId: square.id);
+    showPropertySheet(context, propertyId: square.id, nfcAvailable: _nfcAvailable);
   }
 
   /// Any Digipoly card touching the phone lands here from the always-on
@@ -403,7 +410,7 @@ class _GameScreenState extends State<GameScreen> {
         } else if (session.propertyById(propertyId) == null) {
           _snack('Property not found on this board.');
         } else {
-          _openProperties(propertyId: propertyId);
+          showPropertySheet(context, propertyId: propertyId, nfcAvailable: _nfcAvailable);
         }
       case NfcPlayerCard(:final playerId):
         final player = session.playerById(playerId);
@@ -1105,12 +1112,12 @@ class _GameScreenState extends State<GameScreen> {
           SectionHeader(
             title: 'Properties',
             trailing: TextButton(
-              onPressed: _openProperties,
+              onPressed: _openPropertiesList,
               child: const Text('View all'),
             ),
           ),
           InkWell(
-            onTap: _openProperties,
+            onTap: _openPropertiesList,
             borderRadius: BorderRadius.circular(18),
             child: Container(
               width: double.infinity,
@@ -1224,9 +1231,10 @@ class _GameScreenState extends State<GameScreen> {
 /// toggles via the app-bar button. Non-modal so it doesn't block the rest
 /// of the screen or get dismissed by tapping elsewhere.
 class _BoardSheet extends StatelessWidget {
-  const _BoardSheet({required this.onClose});
+  const _BoardSheet({required this.onClose, required this.nfcAvailable});
 
   final VoidCallback onClose;
+  final bool nfcAvailable;
 
   @override
   Widget build(BuildContext context) {
@@ -1267,11 +1275,10 @@ class _BoardSheet extends StatelessWidget {
                 board: board,
                 players: session.players,
                 ownerships: session.ownerships,
-                onTapProperty: (property) => Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (_) =>
-                        PropertiesScreen(openPropertyId: property.id),
-                  ),
+                onTapProperty: (property) => showPropertySheet(
+                  context,
+                  propertyId: property.id,
+                  nfcAvailable: nfcAvailable,
                 ),
               ),
             ),

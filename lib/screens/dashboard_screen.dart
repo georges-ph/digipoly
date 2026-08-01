@@ -137,11 +137,12 @@ class _DashboardBody extends StatelessWidget {
               board: game.board,
               players: session.players,
               ownerships: session.ownerships,
-              onTapProperty: (property) => Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) =>
-                      PropertiesScreen(openPropertyId: property.id),
-                ),
+              // No NFC concept on a dashboard (a TV, a spectator's device) —
+              // the "register a card" icon inside the sheet just stays off.
+              onTapProperty: (property) => showPropertySheet(
+                context,
+                propertyId: property.id,
+                nfcAvailable: false,
               ),
             ),
           ],
