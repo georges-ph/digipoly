@@ -317,12 +317,31 @@ class GameProvider extends ChangeNotifier {
       );
     }
 
+    // Load this device's last-known cache first so the screen has real
+    // data to show right away — and, if the host can't be reached, keeps
+    // showing it instead of going blank. A fresh snapshot (once/if the
+    // connection succeeds) replaces it wholesale, same as it always has.
+    _record = record;
+    _players = await _db.getPlayers(record.game.id);
+    _transactions = await _db.getTransactions(record.game.id);
+    _ownerships
+      ..clear()
+      ..addEntries(
+        (await _db.getOwnerships(record.game.id))
+            .map((o) => MapEntry(o.propertyId, o)),
+      );
+    final turnState = await _db.getTurnState(record.game.id);
+    _currentTurnId = turnState.currentTurnId;
+    _lastRoll = turnState.lastRoll;
+    _turnRolled = turnState.turnRolled;
+    _freeParkingPot = turnState.freeParkingPot;
+    notifyListeners();
+
     final host = record.hostAddress;
     final port = record.hostPort;
     if (host == null || port == null) {
       return err('No known address for this game. Join it from Discover.');
     }
-    _record = record;
     return _connect(host, port);
   }
 
