@@ -178,6 +178,39 @@ class _SendMoneyScreenState extends State<SendMoneyScreen> {
     super.dispose();
   }
 
+  /// Paying someone directly moves real money with one tap — confirm first,
+  /// same as the NFC tap-to-pay flow already does. Collecting from the
+  /// bank and requesting money skip this: a collect is already flagged to
+  /// the rest of the table as it happens, and a request doesn't move money
+  /// until the other side accepts it.
+  Future<void> _confirmAndSubmit() async {
+    if (widget.mode != SendMode.pay) return _submit();
+    final session = context.read<GameProvider>();
+    final board = session.game?.board;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text('Pay ${session.accountName(_recipientId)}?'),
+        content: Text(
+          '${formatMoney(_amount, board?.currencySymbol ?? r'$')} '
+          'will be sent to ${session.accountName(_recipientId)}.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(minimumSize: const Size(0, 44)),
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Pay'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true && mounted) await _submit();
+  }
+
   Future<void> _submit() async {
     if (_amount <= 0 || _sending) return;
     final session = context.read<GameProvider>();
@@ -398,7 +431,7 @@ class _SendMoneyScreenState extends State<SendMoneyScreen> {
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
               child: FilledButton(
-                onPressed: canSend ? _submit : null,
+                onPressed: canSend ? _confirmAndSubmit : null,
                 child: _sending
                     ? Row(
                         mainAxisAlignment: MainAxisAlignment.center,
