@@ -12,6 +12,7 @@ class Player {
     this.position = 0,
     this.inJail = false,
     this.jailTurns = 0,
+    this.jailCards = 0,
   });
 
   /// Sentinel id for the bank. The bank has infinite money and is a valid
@@ -45,6 +46,10 @@ class Player {
   /// Failed jail-escape attempts so far this stay (0..3).
   final int jailTurns;
 
+  /// Get Out of Jail Free cards currently held (drawn from Chance/Community
+  /// Chest, kept until used — see [GameEngine]/GameServer's jail handling).
+  final int jailCards;
+
   Map<String, dynamic> toJson() => {
         'id': id,
         'name': name,
@@ -56,6 +61,7 @@ class Player {
         'position': position,
         'inJail': inJail,
         'jailTurns': jailTurns,
+        'jailCards': jailCards,
       };
 
   factory Player.fromJson(Map<String, dynamic> json) => Player(
@@ -69,6 +75,7 @@ class Player {
         position: json['position'] as int? ?? 0,
         inJail: json['inJail'] as bool? ?? false,
         jailTurns: json['jailTurns'] as int? ?? 0,
+        jailCards: json['jailCards'] as int? ?? 0,
       );
 
   Player copyWith({
@@ -81,6 +88,7 @@ class Player {
     int? position,
     bool? inJail,
     int? jailTurns,
+    int? jailCards,
   }) =>
       Player(
         id: id,
@@ -93,5 +101,6 @@ class Player {
         position: position ?? this.position,
         inJail: inJail ?? this.inJail,
         jailTurns: jailTurns ?? this.jailTurns,
+        jailCards: jailCards ?? this.jailCards,
       );
 }

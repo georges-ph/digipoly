@@ -60,6 +60,12 @@ class GameServer {
   final List<BoardCard> _chanceDeck = [];
   final List<BoardCard> _chestDeck = [];
 
+  // A "Get Out of Jail Free" card leaves its pile the moment it's drawn and
+  // stays out — held by whoever drew it — until they use it, same as a
+  // physical card sitting in someone's hand instead of the deck.
+  final Set<String> _chanceCardsOut = {};
+  final Set<String> _chestCardsOut = {};
+
   final Map<String, WebSocketChannel> _connections = {};
 
   /// Read-only viewers (e.g. a TV running the dashboard) — never a seat,
@@ -105,6 +111,8 @@ class GameServer {
     _spectators.clear();
     _chanceDeck.clear();
     _chestDeck.clear();
+    _chanceCardsOut.clear();
+    _chestCardsOut.clear();
     // Roll state is restored from the DB so restarting the host app
     // mid-turn doesn't hand the current player a fresh roll.
     _currentTurnId = currentTurnId;
@@ -260,6 +268,8 @@ class GameServer {
             _handleEditTransactionNote(playerId, channel, message.payload);
           case MessageType.payJailFine:
             _handlePayJailFine(playerId, channel, message.payload);
+          case MessageType.useJailCard:
+            _handleUseJailCard(playerId, channel, message.payload);
           case MessageType.startAuction:
             _handleStartAuction(playerId, message.payload);
           case MessageType.placeBid:
@@ -1251,15 +1261,67 @@ class GameServer {
     );
   }
 
+  /// Uses a held Get Out of Jail Free card: leaves jail for free, no fine,
+  /// no roll. Moves no money, so unlike [_handlePayJailFine] this doesn't
+  /// go through [_applyTransaction] — it resolves via its own event instead
+  /// (same pattern as [_handleTransferProperty], which also moves no money).
+  void _handleUseJailCard(
+    String senderId,
+    WebSocketChannel channel,
+    Map<String, dynamic> payload,
+  ) {
+    final txId = payload['id'] as String?;
+    final reject = _prepareIntent(senderId, channel, txId);
+    if (reject == null) return;
+
+    final player = _players[senderId]!;
+    if (senderId != _currentTurnId || !player.inJail || _turnRolled) {
+      reject("You're not stuck in jail right now.");
+      return;
+    }
+    if (player.jailCards <= 0) {
+      reject("You don't have a Get Out of Jail Free card.");
+      return;
+    }
+
+    final freed = player.copyWith(
+      inJail: false,
+      jailTurns: 0,
+      jailCards: player.jailCards - 1,
+    );
+    _players[senderId] = freed;
+    _db.upsertPlayers(_game!.id, [freed]);
+    _returnJailCard();
+
+    _broadcast(WsMessage(MessageType.jailCardUsed, {
+      'txId': txId,
+      'player': freed.toJson(),
+    }));
+  }
+
+  /// Puts one held-out jail card back into circulation — whichever deck it
+  /// came from doesn't matter, every jail card is functionally identical.
+  void _returnJailCard() {
+    if (_chanceCardsOut.isNotEmpty) {
+      _chanceCardsOut.remove(_chanceCardsOut.first);
+    } else if (_chestCardsOut.isNotEmpty) {
+      _chestCardsOut.remove(_chestCardsOut.first);
+    }
+  }
+
   /// Deals the next card off [deck]'s shuffled pile, reshuffling a fresh
   /// copy of [cards] once the pile runs out — like a physical deck, every
   /// card is seen before any repeats, rather than an independent random
-  /// pick each time (which could draw the same card over and over).
+  /// pick each time (which could draw the same card over and over). Cards
+  /// currently held out (a jail card someone is holding) are left out of
+  /// the reshuffle, unless that would leave nothing to draw at all.
   BoardCard _drawFromDeck(String deck, List<BoardCard> cards) {
     final pile = deck == 'chest' ? _chestDeck : _chanceDeck;
     if (pile.isEmpty) {
+      final heldOut = deck == 'chest' ? _chestCardsOut : _chanceCardsOut;
+      final available = cards.where((c) => !heldOut.contains(c.id)).toList();
       pile
-        ..addAll(cards)
+        ..addAll(available.isEmpty ? cards : available)
         ..shuffle(_random);
     }
     return pile.removeLast();
@@ -1301,6 +1363,16 @@ class GameServer {
       // pays GO salary even if it happens to land exactly on GO.
       final mover = _players[playerId];
       if (mover != null && !mover.inJail) _movePlayer(mover, moveBy);
+    } else if (card.grantsJailCard) {
+      // Held onto rather than applied immediately — the card leaves this
+      // deck's rotation (see _drawFromDeck) until the holder uses it.
+      final holder = _players[playerId];
+      if (holder != null) {
+        final updated = holder.copyWith(jailCards: holder.jailCards + 1);
+        _players[playerId] = updated;
+        _db.upsertPlayers(game.id, [updated]);
+        (deck == 'chest' ? _chestCardsOut : _chanceCardsOut).add(card.id);
+      }
     }
 
     _broadcast(WsMessage(MessageType.cardDrawn, {

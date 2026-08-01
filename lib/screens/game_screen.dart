@@ -208,6 +208,18 @@ class _GameScreenState extends State<GameScreen> {
                   ),
                 ),
               ],
+              if (event.card.grantsJailCard) ...[
+                const SizedBox(height: 12),
+                Text(
+                  who == 'You'
+                      ? "Kept until you're in jail and choose to use it."
+                      : 'Kept until used to get out of jail free.',
+                  textAlign: TextAlign.center,
+                  style: textTheme.bodySmall?.copyWith(
+                    color: Theme.of(dialogContext).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
             ],
           ),
           actions: [
@@ -404,6 +416,13 @@ class _GameScreenState extends State<GameScreen> {
   Future<void> _payJailFine() async {
     final session = context.read<GameProvider>();
     final result = await session.payJailFine();
+    if (!mounted) return;
+    if (!result.isOk) showSnack(context, result.error!);
+  }
+
+  Future<void> _useJailCard() async {
+    final session = context.read<GameProvider>();
+    final result = await session.useJailCard();
     if (!mounted) return;
     if (!result.isOk) showSnack(context, result.error!);
   }
@@ -780,13 +799,26 @@ class _GameScreenState extends State<GameScreen> {
                     const SizedBox(width: 10),
                     Expanded(
                       child: Text(
-                        'In jail — pay '
-                        '${formatMoney(board.jailFine, board.currencySymbol)} '
-                        'to leave, or roll for doubles.',
+                        (session.me?.jailCards ?? 0) > 0
+                            ? 'In jail — use your Get Out of Jail Free '
+                                'card, pay '
+                                '${formatMoney(board.jailFine, board.currencySymbol)}, '
+                                'or roll for doubles.'
+                            : 'In jail — pay '
+                                '${formatMoney(board.jailFine, board.currencySymbol)} '
+                                'to leave, or roll for doubles.',
                         style: textTheme.bodyMedium,
                       ),
                     ),
                     const SizedBox(width: 10),
+                    if ((session.me?.jailCards ?? 0) > 0) ...[
+                      OutlinedButton(
+                        onPressed:
+                            session.canUseJailCard ? _useJailCard : null,
+                        child: const Text('Use card'),
+                      ),
+                      const SizedBox(width: 8),
+                    ],
                     FilledButton(
                       onPressed:
                           session.canPayJailFine ? _payJailFine : null,

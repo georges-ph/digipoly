@@ -215,6 +215,15 @@ class GameProvider extends ChangeNotifier {
       !_turnRolled &&
       me?.inJail == true;
 
+  /// Whether I can use a held Get Out of Jail Free card right now — my
+  /// turn, in jail, before rolling, and I actually have one.
+  bool get canUseJailCard =>
+      _connection == ClientStatus.connected &&
+      isMyTurn &&
+      !_turnRolled &&
+      me?.inJail == true &&
+      (me?.jailCards ?? 0) > 0;
+
   /// A money request another player sent me, waiting for my answer.
   MoneyRequest? get incomingRequest => _incomingRequest;
 
@@ -723,6 +732,17 @@ class GameProvider extends ChangeNotifier {
     return _awaitVerdict(_client!.sendPayJailFine());
   }
 
+  /// Uses a held Get Out of Jail Free card to leave immediately, before
+  /// rolling — no fine, no roll.
+  Future<Result<void>> useJailCard() {
+    if (!canUseJailCard) {
+      return Future.value(err("You don't have a Get Out of Jail Free card."));
+    }
+    final offline = _requireConnection();
+    if (offline != null) return Future.value(offline);
+    return _awaitVerdict(_client!.sendUseJailCard());
+  }
+
   // ------------------------------------------------------- Incoming events
 
   void _onMessage(WsMessage message) {
@@ -797,6 +817,14 @@ class GameProvider extends ChangeNotifier {
           _incomingRequest = null;
           notifyListeners();
         }
+      case MessageType.jailCardUsed:
+        // Moves no money, so this resolves the pending intent itself
+        // (carries the intent's txId) instead of via paymentApplied.
+        _pendingPayments
+            .remove(message.payload['txId'] as String?)
+            ?.complete(ok(null));
+        final json = message.payload['player'] as Map<String, dynamic>?;
+        if (json != null) _upsertPlayer(Player.fromJson(json));
       case MessageType.cardDrawn:
         final cardJson = message.payload['card'] as Map<String, dynamic>?;
         final drawerId = message.payload['playerId'] as String?;

@@ -15,9 +15,15 @@ import 'property.dart';
 /// exactly on GO, since backing up onto it isn't "passing" GO — matching the
 /// physical rule that a Go Back card never collects.
 ///
-/// A card is exactly one of: a money card, a move-to card, or a move-by
-/// card — the board editor enforces that. Movement effects are only
-/// meaningful on boards with a curated layout; elsewhere there is no
+/// [grantsJailCard] is the classic "Get Out of Jail Free" card: instead of
+/// any immediate effect, the drawer holds onto it (`Player.jailCards`) until
+/// they choose to use it to leave jail for free, skipping the fine and the
+/// roll. Stays out of its deck's rotation while held, same as a physical
+/// card being in someone's hand instead of the pile.
+///
+/// A card is exactly one of: a money card, a move-to card, a move-by card,
+/// or a jail card — the board editor enforces that. Movement effects are
+/// only meaningful on boards with a curated layout; elsewhere there is no
 /// position to move, so the card is shown but has no effect.
 class BoardCard {
   const BoardCard({
@@ -26,6 +32,7 @@ class BoardCard {
     this.amount = 0,
     this.moveToPropertyId,
     this.moveBySpaces,
+    this.grantsJailCard = false,
   });
 
   final String id;
@@ -33,6 +40,7 @@ class BoardCard {
   final int amount;
   final String? moveToPropertyId;
   final int? moveBySpaces;
+  final bool grantsJailCard;
 
   Map<String, dynamic> toJson() => {
         'id': id,
@@ -40,6 +48,7 @@ class BoardCard {
         'amount': amount,
         if (moveToPropertyId != null) 'moveToPropertyId': moveToPropertyId,
         if (moveBySpaces != null) 'moveBySpaces': moveBySpaces,
+        if (grantsJailCard) 'grantsJailCard': grantsJailCard,
       };
 
   factory BoardCard.fromJson(Map<String, dynamic> json) => BoardCard(
@@ -48,6 +57,7 @@ class BoardCard {
         amount: json['amount'] as int? ?? 0,
         moveToPropertyId: json['moveToPropertyId'] as String?,
         moveBySpaces: json['moveBySpaces'] as int?,
+        grantsJailCard: json['grantsJailCard'] as bool? ?? false,
       );
 
   BoardCard copyWith({
@@ -55,6 +65,7 @@ class BoardCard {
     int? amount,
     String? moveToPropertyId,
     int? moveBySpaces,
+    bool? grantsJailCard,
     bool clearMoveTarget = false,
   }) =>
       BoardCard(
@@ -67,6 +78,9 @@ class BoardCard {
         moveBySpaces: clearMoveTarget
             ? null
             : (moveBySpaces ?? this.moveBySpaces),
+        grantsJailCard: clearMoveTarget
+            ? false
+            : (grantsJailCard ?? this.grantsJailCard),
       );
 }
 

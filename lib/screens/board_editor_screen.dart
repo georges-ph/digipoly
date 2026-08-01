@@ -591,6 +591,13 @@ class _CardList extends StatelessWidget {
       return spaces < 0 ? 'Back ${-spaces} spaces' : 'Forward $spaces spaces';
     }
 
+    String? subtitleFor(BoardCard card) {
+      if (card.grantsJailCard) return 'Get out of jail free';
+      final target = moveTargetName(card);
+      if (target != null) return 'Moves to $target';
+      return moveBySubtitle(card);
+    }
+
     return Column(
       children: [
         for (final card in cards)
@@ -607,12 +614,10 @@ class _CardList extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
               style: textTheme.bodyMedium,
             ),
-            subtitle: (moveTargetName(card) ?? moveBySubtitle(card)) == null
+            subtitle: subtitleFor(card) == null
                 ? null
                 : Text(
-                    moveTargetName(card) != null
-                        ? 'Moves to ${moveTargetName(card)}'
-                        : moveBySubtitle(card)!,
+                    subtitleFor(card)!,
                     style: textTheme.bodySmall
                         ?.copyWith(color: scheme.onSurfaceVariant),
                   ),
@@ -943,7 +948,7 @@ class _PropertySheetState extends State<_PropertySheet> {
 // Card editing sheet
 // ---------------------------------------------------------------------------
 
-enum _CardEffect { money, move, moveBy }
+enum _CardEffect { money, move, moveBy, jailCard }
 
 class _CardSheet extends StatefulWidget {
   const _CardSheet({this.initial, required this.properties});
@@ -976,7 +981,9 @@ class _CardSheetState extends State<_CardSheet> {
       ? _CardEffect.move
       : widget.initial?.moveBySpaces != null
           ? _CardEffect.moveBy
-          : _CardEffect.money;
+          : widget.initial?.grantsJailCard == true
+              ? _CardEffect.jailCard
+              : _CardEffect.money;
   late String? _moveTargetId = widget.initial?.moveToPropertyId;
 
   @override
@@ -1013,6 +1020,18 @@ class _CardSheetState extends State<_CardSheet> {
           id: widget.initial?.id ?? const Uuid().v4(),
           text: text,
           moveBySpaces: _movesForward ? spaces : -spaces,
+        ),
+        false,
+      ));
+      return;
+    }
+
+    if (_effect == _CardEffect.jailCard) {
+      Navigator.of(context).pop((
+        BoardCard(
+          id: widget.initial?.id ?? const Uuid().v4(),
+          text: text,
+          grantsJailCard: true,
         ),
         false,
       ));
@@ -1084,6 +1103,10 @@ class _CardSheetState extends State<_CardSheet> {
                 value: _CardEffect.moveBy,
                 label: Text('Move by spaces'),
               ),
+              ButtonSegment(
+                value: _CardEffect.jailCard,
+                label: Text('Get out of jail free'),
+              ),
             ],
             selected: {_effect},
             onSelectionChanged: (selection) =>
@@ -1138,7 +1161,7 @@ class _CardSheetState extends State<_CardSheet> {
                 ],
                 onChanged: (value) => setState(() => _moveTargetId = value),
               )
-          else
+          else if (_effect == _CardEffect.moveBy)
             Row(
               children: [
                 Expanded(
@@ -1163,6 +1186,12 @@ class _CardSheetState extends State<_CardSheet> {
                   ),
                 ),
               ],
+            )
+          else
+            Text(
+              'The drawer keeps this card until they use it to leave jail '
+              'for free — no fine, no roll.',
+              style: textTheme.bodySmall,
             ),
           const SizedBox(height: 20),
           FilledButton(onPressed: _save, child: const Text('Save card')),

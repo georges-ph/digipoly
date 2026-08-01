@@ -187,6 +187,14 @@ class GameClient {
     return txId;
   }
 
+  /// Uses a held Get Out of Jail Free card to leave immediately, before
+  /// rolling — no fine, no roll.
+  String sendUseJailCard() {
+    final txId = const Uuid().v4();
+    send(WsMessage(MessageType.useJailCard, {'id': txId}));
+    return txId;
+  }
+
   /// Starts a live auction for an unowned property. Not turn-gated —
   /// auctions arise on other players' turns, same as the old bid-after-the-
   /// fact flow.
