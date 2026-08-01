@@ -280,7 +280,7 @@ class _JoinGameScreenState extends State<JoinGameScreen> {
                         subtitle: Text(
                           [
                             if (room.boardName.isNotEmpty) room.boardName,
-                            '${room.host}:${room.port}',
+                            room.host,
                           ].join(' · '),
                           style: textTheme.bodySmall?.copyWith(
                             color: scheme.onSurfaceVariant,
