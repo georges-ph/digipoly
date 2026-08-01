@@ -140,9 +140,9 @@ class TransactionTile extends StatelessWidget {
       ),
       title: Text(
         _title(incoming, outgoing),
-        maxLines: 1,
+        maxLines: 2,
         overflow: TextOverflow.ellipsis,
-        style: textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.w600),
+        style: textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
       ),
       subtitle: Text(
         subtitleParts.join(' · '),
