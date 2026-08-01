@@ -1375,20 +1375,35 @@ class GameServer {
       }
     }
 
+    // "Pay per house/hotel" cards have no fixed amount — the bill is
+    // computed from the drawer's own buildings at draw time. Everything
+    // else uses the card's own fixed amount, as before.
+    final chargedAmount = card.isBuildingRepairs
+        ? -GameEngine.computeBuildingRepairs(
+            ownerships: _ownerships,
+            playerId: playerId,
+            perHouse: card.perHouseCharge ?? 0,
+            perHotel: card.perHotelCharge ?? 0,
+          )
+        : card.amount;
+
     _broadcast(WsMessage(MessageType.cardDrawn, {
       'playerId': playerId,
       'deck': deck,
       'card': card.toJson(),
       'players': _players.values.map((p) => p.toJson()).toList(),
+      // Only meaningful for a repairs card — everyone else can read the
+      // amount straight off the card itself.
+      if (card.isBuildingRepairs) 'chargedAmount': chargedAmount,
     }));
 
-    if (card.amount == 0) return;
+    if (chargedAmount == 0) return;
     final tx = GameTransaction(
       id: const Uuid().v4(),
       gameId: game.id,
-      fromId: card.amount > 0 ? Player.bankId : playerId,
-      toId: card.amount > 0 ? playerId : Player.bankId,
-      amount: card.amount.abs(),
+      fromId: chargedAmount > 0 ? Player.bankId : playerId,
+      toId: chargedAmount > 0 ? playerId : Player.bankId,
+      amount: chargedAmount.abs(),
       type: TransactionType.card,
       timestamp: DateTime.now(),
       note: card.text,

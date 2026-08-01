@@ -22,7 +22,15 @@ import '../services/game_client.dart';
 import '../services/game_server.dart';
 import '../services/identity_service.dart';
 
-typedef CardDrawEvent = ({String playerId, String deck, BoardCard card});
+typedef CardDrawEvent = ({
+  String playerId,
+  String deck,
+  BoardCard card,
+  // The actual amount charged/paid for a "pay per building" repairs card
+  // (computed server-side from the drawer's buildings) — null for every
+  // other card, which can be read straight off card.amount instead.
+  int? chargedAmount,
+});
 
 /// The active game session on this device.
 ///
@@ -865,6 +873,7 @@ class GameProvider extends ChangeNotifier {
             playerId: drawerId,
             deck: message.payload['deck'] as String? ?? 'chance',
             card: BoardCard.fromJson(cardJson),
+            chargedAmount: message.payload['chargedAmount'] as int?,
           ));
         }
         notifyListeners();

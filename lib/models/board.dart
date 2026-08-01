@@ -21,10 +21,16 @@ import 'property.dart';
 /// roll. Stays out of its deck's rotation while held, same as a physical
 /// card being in someone's hand instead of the pile.
 ///
-/// A card is exactly one of: a money card, a move-to card, a move-by card,
-/// or a jail card — the board editor enforces that. Movement effects are
-/// only meaningful on boards with a curated layout; elsewhere there is no
-/// position to move, so the card is shown but has no effect.
+/// [perHouseCharge]/[perHotelCharge] are the classic "street repairs" cards:
+/// "pay $X per house, $Y per hotel you own". The charge is computed from the
+/// drawer's own buildings across every property they own (`GameEngine.
+/// computeBuildingRepairs`) at draw time, not a fixed [amount] — always a
+/// charge to the drawer, never a payout.
+///
+/// A card is exactly one of: a money card, a move-to card, a move-by card, a
+/// jail card, or a repairs card — the board editor enforces that. Movement
+/// effects are only meaningful on boards with a curated layout; elsewhere
+/// there is no position to move, so the card is shown but has no effect.
 class BoardCard {
   const BoardCard({
     required this.id,
@@ -33,6 +39,8 @@ class BoardCard {
     this.moveToPropertyId,
     this.moveBySpaces,
     this.grantsJailCard = false,
+    this.perHouseCharge,
+    this.perHotelCharge,
   });
 
   final String id;
@@ -41,6 +49,12 @@ class BoardCard {
   final String? moveToPropertyId;
   final int? moveBySpaces;
   final bool grantsJailCard;
+  final int? perHouseCharge;
+  final int? perHotelCharge;
+
+  /// Whether this is a "pay per building" repairs card at all — true as
+  /// soon as either rate is set, even if the author left the other at 0.
+  bool get isBuildingRepairs => perHouseCharge != null || perHotelCharge != null;
 
   Map<String, dynamic> toJson() => {
         'id': id,
@@ -49,6 +63,8 @@ class BoardCard {
         if (moveToPropertyId != null) 'moveToPropertyId': moveToPropertyId,
         if (moveBySpaces != null) 'moveBySpaces': moveBySpaces,
         if (grantsJailCard) 'grantsJailCard': grantsJailCard,
+        if (perHouseCharge != null) 'perHouseCharge': perHouseCharge,
+        if (perHotelCharge != null) 'perHotelCharge': perHotelCharge,
       };
 
   factory BoardCard.fromJson(Map<String, dynamic> json) => BoardCard(
@@ -58,6 +74,8 @@ class BoardCard {
         moveToPropertyId: json['moveToPropertyId'] as String?,
         moveBySpaces: json['moveBySpaces'] as int?,
         grantsJailCard: json['grantsJailCard'] as bool? ?? false,
+        perHouseCharge: json['perHouseCharge'] as int?,
+        perHotelCharge: json['perHotelCharge'] as int?,
       );
 
   BoardCard copyWith({
@@ -66,6 +84,8 @@ class BoardCard {
     String? moveToPropertyId,
     int? moveBySpaces,
     bool? grantsJailCard,
+    int? perHouseCharge,
+    int? perHotelCharge,
     bool clearMoveTarget = false,
   }) =>
       BoardCard(
@@ -81,6 +101,12 @@ class BoardCard {
         grantsJailCard: clearMoveTarget
             ? false
             : (grantsJailCard ?? this.grantsJailCard),
+        perHouseCharge: clearMoveTarget
+            ? null
+            : (perHouseCharge ?? this.perHouseCharge),
+        perHotelCharge: clearMoveTarget
+            ? null
+            : (perHotelCharge ?? this.perHotelCharge),
       );
 }
 

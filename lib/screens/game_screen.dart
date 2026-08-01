@@ -223,7 +223,9 @@ class _GameScreenState extends State<GameScreen> {
       context: context,
       builder: (dialogContext) {
         final textTheme = Theme.of(dialogContext).textTheme;
-        final amount = event.card.amount;
+        // A repairs card has no fixed amount — the real bill is computed
+        // server-side from the drawer's own buildings at draw time.
+        final amount = event.chargedAmount ?? event.card.amount;
         return AlertDialog(
           title: Text('$who drew $deckName'),
           content: Column(

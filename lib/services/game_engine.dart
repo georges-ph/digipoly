@@ -180,6 +180,28 @@ abstract final class GameEngine {
     }
   }
 
+  /// The classic "street repairs" Chance/Community Chest card: [perHouse]
+  /// per house and [perHotel] per hotel, across every property [playerId]
+  /// owns (mortgaged or not — the repair bill doesn't care). A hotel
+  /// (`PropertyOwnership.hotel`) counts only as a hotel, not as 5 houses.
+  static int computeBuildingRepairs({
+    required Map<String, PropertyOwnership> ownerships,
+    required String playerId,
+    required int perHouse,
+    required int perHotel,
+  }) {
+    var total = 0;
+    for (final ownership in ownerships.values) {
+      if (ownership.ownerId != playerId) continue;
+      if (ownership.houses >= PropertyOwnership.hotel) {
+        total += perHotel;
+      } else {
+        total += ownership.houses * perHouse;
+      }
+    }
+    return total;
+  }
+
   /// Validates changing the buildings on a street and returns the money
   /// movement: positive = owner pays the bank (building), negative = the
   /// bank pays the owner (selling back at half price, standard rule).

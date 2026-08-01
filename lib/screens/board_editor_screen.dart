@@ -593,6 +593,10 @@ class _CardList extends StatelessWidget {
 
     String? subtitleFor(BoardCard card) {
       if (card.grantsJailCard) return 'Get out of jail free';
+      if (card.isBuildingRepairs) {
+        return '${card.perHouseCharge ?? 0}/house, '
+            '${card.perHotelCharge ?? 0}/hotel';
+      }
       final target = moveTargetName(card);
       if (target != null) return 'Moves to $target';
       return moveBySubtitle(card);
@@ -948,7 +952,7 @@ class _PropertySheetState extends State<_PropertySheet> {
 // Card editing sheet
 // ---------------------------------------------------------------------------
 
-enum _CardEffect { money, move, moveBy, jailCard }
+enum _CardEffect { money, move, moveBy, jailCard, buildingRepairs }
 
 class _CardSheet extends StatefulWidget {
   const _CardSheet({this.initial, required this.properties});
@@ -975,6 +979,12 @@ class _CardSheetState extends State<_CardSheet> {
         ? ''
         : '${widget.initial!.moveBySpaces!.abs()}',
   );
+  late final _perHouseController = TextEditingController(
+    text: '${widget.initial?.perHouseCharge ?? 0}',
+  );
+  late final _perHotelController = TextEditingController(
+    text: '${widget.initial?.perHotelCharge ?? 0}',
+  );
   late bool _playerReceives = (widget.initial?.amount ?? 0) >= 0;
   late bool _movesForward = (widget.initial?.moveBySpaces ?? -1) >= 0;
   late _CardEffect _effect = widget.initial?.moveToPropertyId != null
@@ -983,7 +993,9 @@ class _CardSheetState extends State<_CardSheet> {
           ? _CardEffect.moveBy
           : widget.initial?.grantsJailCard == true
               ? _CardEffect.jailCard
-              : _CardEffect.money;
+              : widget.initial?.isBuildingRepairs == true
+                  ? _CardEffect.buildingRepairs
+                  : _CardEffect.money;
   late String? _moveTargetId = widget.initial?.moveToPropertyId;
 
   @override
@@ -991,6 +1003,8 @@ class _CardSheetState extends State<_CardSheet> {
     _textController.dispose();
     _amountController.dispose();
     _spacesController.dispose();
+    _perHouseController.dispose();
+    _perHotelController.dispose();
     super.dispose();
   }
 
@@ -1032,6 +1046,19 @@ class _CardSheetState extends State<_CardSheet> {
           id: widget.initial?.id ?? const Uuid().v4(),
           text: text,
           grantsJailCard: true,
+        ),
+        false,
+      ));
+      return;
+    }
+
+    if (_effect == _CardEffect.buildingRepairs) {
+      Navigator.of(context).pop((
+        BoardCard(
+          id: widget.initial?.id ?? const Uuid().v4(),
+          text: text,
+          perHouseCharge: int.tryParse(_perHouseController.text.trim()) ?? 0,
+          perHotelCharge: int.tryParse(_perHotelController.text.trim()) ?? 0,
         ),
         false,
       ));
@@ -1106,6 +1133,10 @@ class _CardSheetState extends State<_CardSheet> {
               ButtonSegment(
                 value: _CardEffect.jailCard,
                 label: Text('Get out of jail free'),
+              ),
+              ButtonSegment(
+                value: _CardEffect.buildingRepairs,
+                label: Text('Building repairs'),
               ),
             ],
             selected: {_effect},
@@ -1187,11 +1218,33 @@ class _CardSheetState extends State<_CardSheet> {
                 ),
               ],
             )
-          else
+          else if (_effect == _CardEffect.jailCard)
             Text(
               'The drawer keeps this card until they use it to leave jail '
               'for free — no fine, no roll.',
               style: textTheme.bodySmall,
+            )
+          else
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _perHouseController,
+                    keyboardType: TextInputType.number,
+                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                    decoration: const InputDecoration(labelText: 'Per house'),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: TextField(
+                    controller: _perHotelController,
+                    keyboardType: TextInputType.number,
+                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                    decoration: const InputDecoration(labelText: 'Per hotel'),
+                  ),
+                ),
+              ],
             ),
           const SizedBox(height: 20),
           FilledButton(onPressed: _save, child: const Text('Save card')),

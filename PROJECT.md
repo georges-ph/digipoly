@@ -140,7 +140,8 @@ board — boards with different names/currencies/properties must all work.
   card); revealed in a dialog on every device; money effect auto-applied as
   a `card` transaction. A card is exactly one of: a money card, a **"go to
   X" move card** (`BoardCard.moveToPropertyId`, authored via a Money/Move
-  to property/Move by spaces/Get out of jail free toggle) — drawing one
+  to property/Move by spaces/Get out of jail free/Building repairs toggle)
+  — drawing one
   moves the drawer's token straight to that square (paying GO salary if
   passed/landed on, same as a normal roll) and resolves whatever is there
   exactly like landing on it normally would — a **relative move card**
@@ -148,15 +149,24 @@ board — boards with different names/currencies/properties must all work.
   signed step count applied directly (never normalized into a forward
   distance), so it never pays GO salary even if it happens to land exactly
   on GO, matching the physical rule that backing up onto GO doesn't
-  collect — or a **Get Out of Jail Free card** (`BoardCard.grantsJailCard`):
+  collect — a **Get Out of Jail Free card** (`BoardCard.grantsJailCard`):
   instead of an immediate effect, the drawer holds onto it
   (`Player.jailCards`) and it leaves its deck's rotation (excluded from the
   next reshuffle) until they use it from the jail banner to leave for free
   — no fine, no roll (`useJailCard` intent, resolved via a dedicated
   `jailCardUsed` event since no money moves, same pattern as
-  `transferProperty`). Move/jail-card kinds are only meaningful on boards
-  with a curated layout. Boards with empty decks get a hint to add cards in
-  the editor.
+  `transferProperty`) — or a **building repairs card**
+  (`BoardCard.perHouseCharge`/`perHotelCharge`, e.g. "pay $40 per house,
+  $115 per hotel"): unlike every other money card, it has no fixed
+  `amount` — the bill is computed at draw time from the drawer's own
+  buildings across every property they own
+  (`GameEngine.computeBuildingRepairs`, counting a hotel as a hotel, not
+  as 5 houses) and broadcast as `chargedAmount` alongside the card so
+  every device shows the actual amount, not the card's (unused, always 0)
+  `amount` field. Move/jail-card kinds are only meaningful on boards
+  with a curated layout; building repairs works on any board (it only
+  needs ownerships, not position). Boards with empty decks get a hint to
+  add cards in the editor.
 - **Landing auto-opens the property sheet**: on a board with a curated
   layout, whenever your own roll (or a "go to X" card) moves your token
   onto a street/railroad/utility, that property's sheet pops open right
@@ -183,8 +193,10 @@ All amounts are `int`. All models are hand-written JSON (`toJson`/`fromJson`)
 - `board.dart` — `Board` (currency, startingBalance, salary, jailFine,
   properties, chanceCards/communityChestCards) + `BoardCard` (text, amount:
   + collect / − pay / 0 none; **or** `moveToPropertyId` — a "go to X" card;
-  **or** `moveBySpaces` — a relative move, e.g. "Go Back 3 Spaces"; exactly
-  one of the three). `goIndex`/`jailIndex` are computed getters
+  **or** `moveBySpaces` — a relative move, e.g. "Go Back 3 Spaces"; **or**
+  `grantsJailCard`; **or** `perHouseCharge`/`perHotelCharge` — a building
+  repairs card (`BoardCard.isBuildingRepairs`); exactly one kind at a
+  time). `goIndex`/`jailIndex` are computed getters
   (first `properties` entry of that kind, or -1) — the board layout is
   just `properties` in physical order, not a separate list.
 - `property.dart` — `Property` (kind, colorValue, price, rentTiers,
@@ -278,7 +290,8 @@ unbound-playerId gate).
   non-ownable kinds), computeRent, validateHouses (group rule), nextTurn,
   advancePosition (modular-arithmetic move + GO crossing/landing, GO can
   sit anywhere in the layout), resolveJailRoll (doubles escape / stuck /
-  forced-pay-on-3rd-attempt). Unit-tested.
+  forced-pay-on-3rd-attempt), computeBuildingRepairs (the "pay per house/
+  hotel" card's bill, from the drawer's ownerships). Unit-tested.
 - `game_server.dart` — sockets + state + persistence + broadcast; also
   serves the bundled web app; dice + card draws happen here. `_handleRollDice`
   also moves the roller's token and resolves the landing square
