@@ -19,6 +19,7 @@ import '../services/nfc_service.dart';
 import '../theme/app_theme.dart';
 import '../utils/formatting.dart';
 import '../utils/snack.dart';
+import '../utils/top_banner.dart';
 import '../widgets/activity_feed.dart';
 import '../widgets/auction_card.dart';
 import '../widgets/balance_card.dart';
@@ -51,6 +52,7 @@ class _GameScreenState extends State<GameScreen> {
   StreamSubscription<DiceRoll>? _diceRollSub;
   StreamSubscription<PropertyTransferEvent>? _transferSub;
   StreamSubscription<BankCollectionEvent>? _bankCollectionSub;
+  StreamSubscription<PaymentReceivedEvent>? _paymentReceivedSub;
   final _nfc = NfcService.instance;
   GameProvider? _session;
   bool _requestDialogOpen = false;
@@ -159,9 +161,25 @@ class _GameScreenState extends State<GameScreen> {
       if (session == null) return;
       final board = session.game?.board;
       if (board == null) return;
-      _snack(
+      showTopBanner(
+        context,
         '${session.accountName(event.playerId)} collected '
         '${formatMoney(event.amount, board.currencySymbol)} from the bank',
+        icon: Icons.account_balance_rounded,
+      );
+    });
+    // A direct payment landing in my account — worth a heads-up wherever
+    // I'm looking, same idea as the bank-collection notice above.
+    _paymentReceivedSub = session.paymentsReceived.listen((event) {
+      if (!mounted) return;
+      final session = _session;
+      final board = session?.game?.board;
+      if (session == null || board == null) return;
+      showTopBanner(
+        context,
+        '${session.accountName(event.fromId)} sent you '
+        '${formatMoney(event.amount, board.currencySymbol)}',
+        icon: Icons.arrow_downward_rounded,
       );
     });
     // Money requests pop as a dialog wherever the player currently is.
@@ -184,6 +202,7 @@ class _GameScreenState extends State<GameScreen> {
     _diceRollSub?.cancel();
     _transferSub?.cancel();
     _bankCollectionSub?.cancel();
+    _paymentReceivedSub?.cancel();
     _session?.removeListener(_maybeShowRequestDialog);
     _nfc.stopWatch();
     super.dispose();
@@ -642,10 +661,15 @@ class _GameScreenState extends State<GameScreen> {
                       ? null
                       : () {
                           Clipboard.setData(ClipboardData(text: joinUrl));
-                          showSnack(
-                              context,
-                              'Join link copied — send it to the other '
-                              'players');
+                          // A regular snackbar anchors to the Scaffold below
+                          // this sheet and ends up hidden behind it — the
+                          // overlay-based top banner stays visible instead.
+                          showTopBanner(
+                            sheetContext,
+                            'Join link copied — send it to the other '
+                            'players',
+                            icon: Icons.copy_rounded,
+                          );
                         },
                   borderRadius: BorderRadius.circular(16),
                   child: Container(

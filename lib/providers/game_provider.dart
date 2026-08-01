@@ -40,6 +40,8 @@ typedef PropertyTransferEvent = ({
 
 typedef BankCollectionEvent = ({String playerId, int amount});
 
+typedef PaymentReceivedEvent = ({String fromId, int amount});
+
 /// The active game session on this device.
 ///
 /// Whether hosting or joining, the device always participates through a
@@ -98,6 +100,7 @@ class GameProvider extends ChangeNotifier {
   final _diceRolls = StreamController<DiceRoll>.broadcast();
   final _propertyTransfers = StreamController<PropertyTransferEvent>.broadcast();
   final _bankCollections = StreamController<BankCollectionEvent>.broadcast();
+  final _paymentsReceived = StreamController<PaymentReceivedEvent>.broadcast();
   String? _outgoingRequestId;
 
   // ------------------------------------------------------------- Getters
@@ -121,6 +124,10 @@ class GameProvider extends ChangeNotifier {
   /// bank payout, so this is what lets the rest of the table actually
   /// notice it happened instead of finding out later in the activity feed.
   Stream<BankCollectionEvent> get bankCollections => _bankCollections.stream;
+
+  /// A direct player-to-player payment landing in my account (not a
+  /// settled money request — that already has its own resolution UI).
+  Stream<PaymentReceivedEvent> get paymentsReceived => _paymentsReceived.stream;
 
   bool get hasActiveSession => _record != null && _client != null;
   GameRecord? get record => _record;
@@ -1075,6 +1082,10 @@ class GameProvider extends ChangeNotifier {
       // everyone else rather than only showing up in the activity feed.
       if (tx.type == TransactionType.payment && tx.fromId == Player.bankId) {
         _bankCollections.add((playerId: tx.toId, amount: tx.amount));
+      } else if (tx.type == TransactionType.payment &&
+          tx.toId == myPlayerId &&
+          tx.fromId != Player.bankId) {
+        _paymentsReceived.add((fromId: tx.fromId, amount: tx.amount));
       }
     }
 
@@ -1159,6 +1170,7 @@ class GameProvider extends ChangeNotifier {
     _diceRolls.close();
     _propertyTransfers.close();
     _bankCollections.close();
+    _paymentsReceived.close();
     super.dispose();
   }
 }
