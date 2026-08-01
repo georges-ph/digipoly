@@ -1099,7 +1099,10 @@ class GameServer {
 
   /// Advances [player]'s token by [total] squares, auto-pays salary if GO
   /// was passed or landed on exactly, then resolves the landing square.
-  void _movePlayer(Player player, int total) {
+  /// [paysGoSalary] is false for a "Go to Jail" card teleport — like the
+  /// physical rule, going directly to jail never collects GO even if the
+  /// forward path technically crosses it.
+  void _movePlayer(Player player, int total, {bool paysGoSalary = true}) {
     final game = _game!;
     final board = game.board;
     final advance = GameEngine.advancePosition(
@@ -1111,7 +1114,7 @@ class GameServer {
     var current = player.copyWith(position: advance.position);
     _players[current.id] = current;
 
-    if (advance.crossedGo && board.salary > 0) {
+    if (paysGoSalary && advance.crossedGo && board.salary > 0) {
       final tx = GameTransaction(
         id: const Uuid().v4(),
         gameId: game.id,
@@ -1371,7 +1374,15 @@ class GameServer {
       if (targetIndex >= 0 && mover != null && !mover.inJail) {
         final total =
             (targetIndex - mover.position) % board.properties.length;
-        _movePlayer(mover, total);
+        // A "Go to Jail" card is a direct teleport, not a real trip around
+        // the board — never collects GO even if the forward path crosses
+        // it, same as landing on the Go To Jail square itself.
+        final target = board.properties[targetIndex];
+        _movePlayer(
+          mover,
+          total,
+          paysGoSalary: target.kind != PropertyKind.goToJail,
+        );
       }
     } else if (moveBy != null && moveBy != 0 && board.goIndex >= 0) {
       // A relative move (e.g. "Go Back 3 Spaces") — passed straight through
