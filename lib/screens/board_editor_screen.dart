@@ -954,6 +954,14 @@ class _PropertySheetState extends State<_PropertySheet> {
 
 enum _CardEffect { money, move, moveBy, jailCard, buildingRepairs }
 
+String _cardEffectLabel(_CardEffect effect) => switch (effect) {
+      _CardEffect.money => 'Money',
+      _CardEffect.move => 'Move to property',
+      _CardEffect.moveBy => 'Move by spaces',
+      _CardEffect.jailCard => 'Get out of jail free',
+      _CardEffect.buildingRepairs => 'Building repairs',
+    };
+
 class _CardSheet extends StatefulWidget {
   const _CardSheet({this.initial, required this.properties});
 
@@ -1119,29 +1127,17 @@ class _CardSheetState extends State<_CardSheet> {
             ),
           ),
           const SizedBox(height: 12),
-          SegmentedButton<_CardEffect>(
-            segments: const [
-              ButtonSegment(value: _CardEffect.money, label: Text('Money')),
-              ButtonSegment(
-                value: _CardEffect.move,
-                label: Text('Move to property'),
-              ),
-              ButtonSegment(
-                value: _CardEffect.moveBy,
-                label: Text('Move by spaces'),
-              ),
-              ButtonSegment(
-                value: _CardEffect.jailCard,
-                label: Text('Get out of jail free'),
-              ),
-              ButtonSegment(
-                value: _CardEffect.buildingRepairs,
-                label: Text('Building repairs'),
-              ),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final effect in _CardEffect.values)
+                ChoiceChip(
+                  label: Text(_cardEffectLabel(effect)),
+                  selected: _effect == effect,
+                  onSelected: (_) => setState(() => _effect = effect),
+                ),
             ],
-            selected: {_effect},
-            onSelectionChanged: (selection) =>
-                setState(() => _effect = selection.first),
           ),
           const SizedBox(height: 12),
           if (_effect == _CardEffect.money)
