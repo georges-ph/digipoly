@@ -9,6 +9,7 @@ import 'package:shelf_web_socket/shelf_web_socket.dart';
 import 'package:uuid/uuid.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
+import '../models/board.dart';
 import '../models/dice_roll.dart';
 import '../models/game.dart';
 import '../models/game_transaction.dart';
@@ -51,6 +52,13 @@ class GameServer {
   bool _turnRolled = false;
   int _freeParkingPot = 0;
   final _random = Random();
+
+  // Cards are drawn like a physical pile: shuffled once, dealt off the top,
+  // and reshuffled from the full deck only once it runs out — not a fresh
+  // independent random pick every time, which could (and did) repeat the
+  // same card over and over.
+  final List<BoardCard> _chanceDeck = [];
+  final List<BoardCard> _chestDeck = [];
 
   final Map<String, WebSocketChannel> _connections = {};
 
@@ -95,6 +103,8 @@ class GameServer {
     _pendingRequests.clear();
     _auctions.clear();
     _spectators.clear();
+    _chanceDeck.clear();
+    _chestDeck.clear();
     // Roll state is restored from the DB so restarting the host app
     // mid-turn doesn't hand the current player a fresh roll.
     _currentTurnId = currentTurnId;
@@ -1241,18 +1251,32 @@ class GameServer {
     );
   }
 
-  /// Draws a random card from the board's deck, shows it to the whole
-  /// table and applies its effect — either a bank transaction or, for a
-  /// "go to X" card, moving the drawer's token and resolving whatever's
-  /// there (same as landing on it normally). Called both for a manual
-  /// Chance/Chest quick action and for auto-landing on one.
+  /// Deals the next card off [deck]'s shuffled pile, reshuffling a fresh
+  /// copy of [cards] once the pile runs out — like a physical deck, every
+  /// card is seen before any repeats, rather than an independent random
+  /// pick each time (which could draw the same card over and over).
+  BoardCard _drawFromDeck(String deck, List<BoardCard> cards) {
+    final pile = deck == 'chest' ? _chestDeck : _chanceDeck;
+    if (pile.isEmpty) {
+      pile
+        ..addAll(cards)
+        ..shuffle(_random);
+    }
+    return pile.removeLast();
+  }
+
+  /// Draws a card from the board's deck, shows it to the whole table and
+  /// applies its effect — either a bank transaction or, for a "go to X"
+  /// card, moving the drawer's token and resolving whatever's there (same
+  /// as landing on it normally). Called both for a manual Chance/Chest
+  /// quick action and for auto-landing on one.
   void _drawCardFor(String playerId, String deck) {
     final game = _game!;
     final board = game.board;
     final cards =
         deck == 'chest' ? board.communityChestCards : board.chanceCards;
     if (cards.isEmpty) return;
-    final card = cards[_random.nextInt(cards.length)];
+    final card = _drawFromDeck(deck, cards);
 
     // Move first so the broadcast below already carries the new position.
     // Only meaningful on a board with a curated layout — elsewhere there is
