@@ -43,6 +43,14 @@ flutter:
     # Optional: the web build zipped by tool/bundle_web_app, served by the
     # game server so browsers can join by scanning the room QR.
     - assets/web/
+  fonts:
+    # Bundled locally (not google_fonts) so it's identical on every
+    # platform, including web, without a runtime download — web has no
+    # Roboto of its own, so it was falling back to the browser's generic
+    # sans-serif and looking different from every native build.
+    - family: Inter
+      fonts:
+        - asset: assets/fonts/InterVariable.ttf
 
 # Regenerate after changing assets/icon/*: `dart run flutter_launcher_icons`
 flutter_launcher_icons:

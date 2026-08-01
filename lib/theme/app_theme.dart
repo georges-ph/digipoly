@@ -2,9 +2,12 @@ import 'package:flutter/material.dart';
 
 /// Central design tokens: a violet fintech accent and soft rounded surfaces.
 /// Both light and dark themes are supported; the app follows the system
-/// setting. Typography stays on the platform font on purpose: runtime font
-/// downloads re-layout the whole app whenever a weight arrives (visible
-/// flicker) and fail on LAN-only game nights with no internet.
+/// setting. Typography uses Inter, bundled as a local asset (not
+/// google_fonts): a runtime font download would re-layout the whole app
+/// whenever a weight arrives (visible flicker) and fail on LAN-only game
+/// nights with no internet — a bundled asset avoids both while still
+/// looking the same on every platform, including web (which has no Roboto
+/// of its own to fall back on).
 abstract final class AppColors {
   static const accent = Color(0xFF635BFF);
   static const accentAlt = Color(0xFF9E77FF);
@@ -79,7 +82,11 @@ abstract final class AppTheme {
       error: AppColors.expense,
     );
 
-    final base = ThemeData(colorScheme: scheme, useMaterial3: true);
+    final base = ThemeData(
+      colorScheme: scheme,
+      useMaterial3: true,
+      fontFamily: 'Inter',
+    );
     final textTheme = base.textTheme;
 
     return base.copyWith(
