@@ -40,7 +40,7 @@ typedef PropertyTransferEvent = ({
 
 typedef BankCollectionEvent = ({String playerId, int amount});
 
-typedef PaymentReceivedEvent = ({String fromId, int amount});
+typedef PaymentReceivedEvent = ({String fromId, int amount, bool isRent});
 
 /// The active game session on this device.
 ///
@@ -125,8 +125,9 @@ class GameProvider extends ChangeNotifier {
   /// notice it happened instead of finding out later in the activity feed.
   Stream<BankCollectionEvent> get bankCollections => _bankCollections.stream;
 
-  /// A direct player-to-player payment landing in my account (not a
-  /// settled money request — that already has its own resolution UI).
+  /// A direct payment or rent landing in my account (not a settled money
+  /// request — that already has its own resolution UI, and not a card or
+  /// transfer, which already pop their own dialog for everyone involved).
   Stream<PaymentReceivedEvent> get paymentsReceived => _paymentsReceived.stream;
 
   bool get hasActiveSession => _record != null && _client != null;
@@ -1082,10 +1083,20 @@ class GameProvider extends ChangeNotifier {
       // everyone else rather than only showing up in the activity feed.
       if (tx.type == TransactionType.payment && tx.fromId == Player.bankId) {
         _bankCollections.add((playerId: tx.toId, amount: tx.amount));
-      } else if (tx.type == TransactionType.payment &&
-          tx.toId == myPlayerId &&
-          tx.fromId != Player.bankId) {
-        _paymentsReceived.add((fromId: tx.fromId, amount: tx.amount));
+      } else if (tx.toId == myPlayerId &&
+          tx.fromId != Player.bankId &&
+          (tx.type == TransactionType.payment ||
+              tx.type == TransactionType.rent)) {
+        // A direct payment or rent landing in my account — the two cases
+        // where money shows up without me having done anything myself, so
+        // there's nothing else already telling me it happened (unlike a
+        // card draw or a transfer, which already pop their own dialog for
+        // everyone involved).
+        _paymentsReceived.add((
+          fromId: tx.fromId,
+          amount: tx.amount,
+          isRent: tx.type == TransactionType.rent,
+        ));
       }
     }
 

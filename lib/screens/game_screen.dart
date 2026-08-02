@@ -176,10 +176,12 @@ class _GameScreenState extends State<GameScreen> {
       final session = _session;
       final board = session?.game?.board;
       if (session == null || board == null) return;
+      final amount = formatMoney(event.amount, board.currencySymbol);
       showTopBanner(
         context,
-        '${session.accountName(event.fromId)} sent you '
-        '${formatMoney(event.amount, board.currencySymbol)}',
+        event.isRent
+            ? '${session.accountName(event.fromId)} paid you $amount rent'
+            : '${session.accountName(event.fromId)} sent you $amount',
         icon: Icons.arrow_downward_rounded,
       );
     });
