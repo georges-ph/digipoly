@@ -178,7 +178,12 @@ class _AuctionCardState extends State<AuctionCard> {
                   child: TextField(
                     controller: _controller,
                     focusNode: _focusNode,
-                    autofocus: true,
+                    // Only the player who actually started this auction
+                    // gets the keyboard opened on them automatically —
+                    // everyone else sees this same card the instant the
+                    // auction starts, and autofocus for all of them would
+                    // pop every connected keyboard at once.
+                    autofocus: widget.auction.startedBy == session.myPlayerId,
                     keyboardType: TextInputType.number,
                     decoration: InputDecoration(
                       isDense: true,

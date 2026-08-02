@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 
 import '../theme/app_theme.dart';
@@ -21,53 +19,32 @@ void showTopBanner(
   final overlay = Navigator.of(context, rootNavigator: true).overlay;
   if (overlay == null) return;
 
-  final entry = _TopBannerEntry();
-  Timer? timer;
-
-  void dismiss() {
-    timer?.cancel();
-    entry.dismiss();
-  }
-
-  entry.overlayEntry = OverlayEntry(
+  late final OverlayEntry entry;
+  entry = OverlayEntry(
     builder: (context) => _TopBanner(
       message: message,
       icon: icon,
-      onDismissed: entry.remove,
-      onTap: dismiss,
+      duration: duration,
+      onDone: () {
+        if (entry.mounted) entry.remove();
+      },
     ),
   );
-
-  overlay.insert(entry.overlayEntry);
-  timer = Timer(duration, dismiss);
-}
-
-/// Bundles the [OverlayEntry] with a [GlobalKey] onto its animated state so
-/// a tap (or the timer) can trigger the same out-animation before removal,
-/// instead of yanking the banner off screen instantly either way.
-class _TopBannerEntry {
-  late final OverlayEntry overlayEntry;
-  final _key = GlobalKey<_TopBannerState>();
-
-  void dismiss() => _key.currentState?.dismiss();
-
-  void remove() {
-    if (overlayEntry.mounted) overlayEntry.remove();
-  }
+  overlay.insert(entry);
 }
 
 class _TopBanner extends StatefulWidget {
   const _TopBanner({
     required this.message,
     required this.icon,
-    required this.onDismissed,
-    required this.onTap,
+    required this.duration,
+    required this.onDone,
   });
 
   final String message;
   final IconData icon;
-  final VoidCallback onDismissed;
-  final VoidCallback onTap;
+  final Duration duration;
+  final VoidCallback onDone;
 
   @override
   State<_TopBanner> createState() => _TopBannerState();
@@ -83,17 +60,20 @@ class _TopBannerState extends State<_TopBanner>
     begin: const Offset(0, -1),
     end: Offset.zero,
   ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeOutCubic));
+  bool _dismissing = false;
 
   @override
   void initState() {
     super.initState();
     _controller.forward();
+    Future.delayed(widget.duration, _dismiss);
   }
 
-  Future<void> dismiss() async {
-    if (!mounted) return;
+  Future<void> _dismiss() async {
+    if (_dismissing || !mounted) return;
+    _dismissing = true;
     await _controller.reverse();
-    widget.onDismissed();
+    widget.onDone();
   }
 
   @override
@@ -119,9 +99,7 @@ class _TopBannerState extends State<_TopBanner>
               elevation: 6,
               borderRadius: BorderRadius.circular(AppTheme.radius),
               child: InkWell(
-                onTap: () {
-                  widget.onTap();
-                },
+                onTap: _dismiss,
                 borderRadius: BorderRadius.circular(AppTheme.radius),
                 child: Padding(
                   padding:

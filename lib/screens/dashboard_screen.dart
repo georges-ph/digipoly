@@ -269,12 +269,16 @@ class _PlayerCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 12),
-          Text(
-            formatMoney(player.balance, currency),
-            style: textTheme.headlineSmall?.copyWith(
-              fontWeight: FontWeight.w800,
-              letterSpacing: -0.5,
-              color: player.balance < 0 ? AppColors.expense : null,
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              formatMoney(player.balance, currency),
+              style: textTheme.headlineSmall?.copyWith(
+                fontWeight: FontWeight.w800,
+                letterSpacing: -0.5,
+                color: player.balance < 0 ? AppColors.expense : null,
+              ),
             ),
           ),
           const SizedBox(height: 10),

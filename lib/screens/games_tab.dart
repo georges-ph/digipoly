@@ -39,9 +39,21 @@ class _GamesTabState extends State<GamesTab> {
   @override
   void initState() {
     super.initState();
+    // GamesProvider's initial load() (kicked off in main.dart) is async and
+    // may still be empty on this first frame — probing once here would
+    // silently probe nothing. Re-probing on every change (including that
+    // first load landing) is cheap enough given the short per-probe timeout
+    // and small list sizes, and doubles as picking up a host going down.
+    context.read<GamesProvider>().addListener(_probeReachability);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _probeReachability();
     });
+  }
+
+  @override
+  void dispose() {
+    context.read<GamesProvider>().removeListener(_probeReachability);
+    super.dispose();
   }
 
   Future<void> _probeReachability() async {

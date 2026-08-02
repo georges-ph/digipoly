@@ -382,6 +382,24 @@ Future<bool?> showPropertySheet(
 }) {
   final nfc = NfcService.instance;
 
+  // Landing on an unowned square with no auction running is the one case
+  // where the official rule forces a decision — buy it, or decline and it
+  // goes to auction — so the sheet can't just be dragged or tapped away as
+  // a silent third option, leaving it unowned indefinitely. Every other
+  // case (browsing, an owned property, a running auction) stays freely
+  // dismissible as normal.
+  final session = context.read<GameProvider>();
+  final board = session.game?.board;
+  final property = session.propertyById(propertyId);
+  final decisionRequired = board != null &&
+      property != null &&
+      property.kind.isOwnable &&
+      session.ownershipOf(propertyId) == null &&
+      session.auctionFor(propertyId) == null &&
+      session.canResolve &&
+      (board.goIndex < 0 ||
+          session.me?.position == board.properties.indexOf(property));
+
   Future<void> writeCard() async {
     final session = context.read<GameProvider>();
     final board = session.game?.board;
@@ -424,6 +442,9 @@ Future<bool?> showPropertySheet(
   return showModalBottomSheet<bool>(
     context: context,
     isScrollControlled: true,
+    isDismissible: !decisionRequired,
+    enableDrag: !decisionRequired,
+    showDragHandle: !decisionRequired,
     builder: (_) => _PropertySheet(
       propertyId: propertyId,
       nfcAvailable: nfcAvailable,

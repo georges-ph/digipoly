@@ -212,14 +212,16 @@ class _GameScreenState extends State<GameScreen> {
   }
 
   /// After my own roll (or a card that moved me) has been revealed: show
-  /// the board — so the move is actually seen before anything else pops up
-  /// — then, once I close it myself, open the landed property's sheet.
+  /// the board so the move is actually seen. Doesn't chain into
+  /// auto-opening the landed property sheet once the board closes — closing
+  /// one sheet to have another pop up unannounced reads as a trap, not a
+  /// convenience. The board itself highlights the token that just moved;
+  /// tapping that square opens its sheet, same as any other square.
   Future<void> _afterRollReveal() async {
     if (!mounted) return;
     if ((_session?.game?.board.goIndex ?? -1) >= 0) {
       await _openBoardSheet();
     }
-    if (mounted) _maybeOpenLandedProperty();
   }
 
   /// The app-bar toggle and the sheet's own close button: an explicit,
@@ -369,25 +371,6 @@ class _GameScreenState extends State<GameScreen> {
     Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => const PropertiesScreen()),
     );
-  }
-
-  /// After my own token moves (a roll, or a "go to X" card), pop the
-  /// property sheet straight open if I landed on an ownable square — buy,
-  /// pay rent or manage buildings without digging through Properties.
-  void _maybeOpenLandedProperty() {
-    if (!mounted) return;
-    final session = _session;
-    final board = session?.game?.board;
-    final position = session?.me?.position;
-    if (session == null || board == null || board.goIndex < 0) return;
-    if (position == null ||
-        position < 0 ||
-        position >= board.properties.length) {
-      return;
-    }
-    final square = board.properties[position];
-    if (!square.kind.isOwnable) return;
-    showPropertySheet(context, propertyId: square.id, nfcAvailable: _nfcAvailable);
   }
 
   /// Any Digipoly card touching the phone lands here from the always-on
