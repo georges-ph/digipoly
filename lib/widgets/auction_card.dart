@@ -87,20 +87,31 @@ class _AuctionCardState extends State<AuctionCard> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: Text(bidderId == null ? 'Cancel this auction?' : 'Close the auction?'),
+        title: Text(
+          bidderId == null ? 'Cancel this auction?' : 'Close the auction?',
+        ),
         content: Text(
           bidderId == null
               ? 'Nobody has bid — the property stays unowned.'
               : 'Sell for ${formatMoney(auction.currentBid, currency)} to '
-                  '$bidderName?'
-                  '${sellingToSelf ? ' You are the only bidder.' : ''}',
+                    '$bidderName?'
+                    '${sellingToSelf ? ' You are the only bidder.' : ''}',
         ),
         actions: [
-          TextButton(
+          // A plain TextButton next to a FilledButton reads as two
+          // different kinds of control rather than two options of the same
+          // decision — worse once a narrow window stacks them vertically
+          // (Flutter's default OverflowBar puts whichever is listed first
+          // on top). An OutlinedButton carries the same visual weight as
+          // the FilledButton beside it, same pairing as the incoming money
+          // request dialog.
+          OutlinedButton(
+            style: OutlinedButton.styleFrom(minimumSize: const Size(0, 44)),
             onPressed: () => Navigator.pop(dialogContext, false),
             child: const Text('Back'),
           ),
           FilledButton(
+            style: FilledButton.styleFrom(minimumSize: const Size(0, 44)),
             onPressed: () => Navigator.pop(dialogContext, true),
             child: Text(bidderId == null ? 'Cancel auction' : 'Close & sell'),
           ),
@@ -122,8 +133,9 @@ class _AuctionCardState extends State<AuctionCard> {
     final auction = widget.auction;
     final bidderId = auction.currentBidderId;
     final iAmLeading = bidderId != null && bidderId == session.myPlayerId;
-    final bidderName =
-        bidderId == null ? null : (iAmLeading ? 'You' : session.accountName(bidderId));
+    final bidderName = bidderId == null
+        ? null
+        : (iAmLeading ? 'You' : session.accountName(bidderId));
 
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
@@ -138,7 +150,11 @@ class _AuctionCardState extends State<AuctionCard> {
         children: [
           Row(
             children: [
-              const Icon(Icons.gavel_rounded, size: 18, color: AppColors.accent),
+              const Icon(
+                Icons.gavel_rounded,
+                size: 18,
+                color: AppColors.accent,
+              ),
               const SizedBox(width: 8),
               if (property.kind.isOwnable) ...[
                 Container(
@@ -154,7 +170,9 @@ class _AuctionCardState extends State<AuctionCard> {
               Expanded(
                 child: Text(
                   'Auction: ${property.name}',
-                  style: textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w800),
+                  style: textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w800,
+                  ),
                 ),
               ),
             ],
@@ -164,7 +182,7 @@ class _AuctionCardState extends State<AuctionCard> {
             bidderName == null
                 ? 'No bids yet'
                 : '${formatMoney(auction.currentBid, board.currencySymbol)} '
-                    '— $bidderName${iAmLeading ? " (you're leading)" : ''}',
+                      '— $bidderName${iAmLeading ? " (you're leading)" : ''}',
             style: textTheme.bodyMedium?.copyWith(
               fontWeight: FontWeight.w700,
               color: iAmLeading ? AppColors.income : null,
@@ -182,8 +200,17 @@ class _AuctionCardState extends State<AuctionCard> {
                     // gets the keyboard opened on them automatically —
                     // everyone else sees this same card the instant the
                     // auction starts, and autofocus for all of them would
-                    // pop every connected keyboard at once.
-                    autofocus: widget.auction.startedBy == session.myPlayerId,
+                    // pop every connected keyboard at once. AuctionCard is
+                    // also shared across game screen/dashboard/property
+                    // sheet, so the starter can have two instances mounted
+                    // at once (e.g. the property sheet's, on top of the
+                    // game screen's underneath) — without the isCurrent
+                    // check both would autofocus and fight over focus,
+                    // leaving the keyboard open but attached to the
+                    // invisible one behind the sheet.
+                    autofocus:
+                        widget.auction.startedBy == session.myPlayerId &&
+                        (ModalRoute.of(context)?.isCurrent ?? true),
                     keyboardType: TextInputType.number,
                     decoration: InputDecoration(
                       isDense: true,
@@ -221,17 +248,17 @@ class _AuctionCardState extends State<AuctionCard> {
                 onPressed: iAmLeading
                     ? null
                     : () => _confirmClose(
-                          session,
-                          bidderId: bidderId,
-                          bidderName: bidderName,
-                          currency: board.currencySymbol,
-                        ),
+                        session,
+                        bidderId: bidderId,
+                        bidderName: bidderName,
+                        currency: board.currencySymbol,
+                      ),
                 child: Text(
                   bidderId == null
                       ? 'Cancel auction'
                       : iAmLeading
-                          ? "You're leading — someone else can close this"
-                          : 'Close — sell to $bidderName',
+                      ? "You're leading — someone else can close this"
+                      : 'Close — sell to $bidderName',
                 ),
               ),
             ),

@@ -197,6 +197,19 @@ Win32Window::MessageHandler(HWND hwnd,
 
       return 0;
     }
+    case WM_GETMINMAXINFO: {
+      // Below this, the banking UI (balance card, quick-action grid,
+      // dialogs) starts clipping/overflowing rather than reflowing — a
+      // floor keeps the window resizable (including in a tiled/snapped
+      // layout) without letting it shrink into a broken state.
+      UINT dpi = FlutterDesktopGetDpiForHWND(hwnd);
+      double scale_factor = dpi / 96.0;
+      auto* info = reinterpret_cast<MINMAXINFO*>(lparam);
+      info->ptMinTrackSize.x = Scale(360, scale_factor);
+      info->ptMinTrackSize.y = Scale(560, scale_factor);
+      return 0;
+    }
+
     case WM_SIZE: {
       RECT rect = GetClientArea();
       if (child_content_ != nullptr) {

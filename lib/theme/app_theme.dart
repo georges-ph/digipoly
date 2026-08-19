@@ -34,9 +34,13 @@ abstract final class AppColors {
   /// the same player id, so avatars match across phones with no syncing.
   /// Each entry is a distinct hue — no two are light/dark shades of the
   /// same color (the one deliberate exception being sky vs. navy blue,
-  /// which read as clearly different colors rather than a gradient).
+  /// which read as clearly different colors rather than a gradient) — and
+  /// none of them is [accent]: that color means "active/highlighted"
+  /// everywhere else in the UI (the turn ring included), so no seat may
+  /// double as that same color, or its own turn ring would land on an
+  /// identically-colored avatar.
   static const avatarPalette = [
-    Color(0xFF635BFF), // violet
+    Color(0xFF8D6E63), // brown
     Color(0xFF16C784), // emerald
     Color(0xFFFF7A45), // orange
     Color(0xFFF5365C), // rose red

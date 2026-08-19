@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
@@ -124,12 +125,23 @@ class GameServer {
 
     // pingInterval matters: without keepalives a phone that dies or drops
     // off the wifi never sends a close frame, and its player would show
-    // online forever.
+    // online forever. But dart:io's WebSocket requires the pong to land
+    // within that *same* interval or it force-closes the connection as
+    // dead (WebSocketStatus.goingAway) — fine for a native socket's near-
+    // instant pong, but a browser tab's pong can occasionally lag behind a
+    // GC pause, a slow paint, or just general JS-engine overhead. At 5s
+    // that was enough to make the web client flap: closed as "dead" and
+    // immediately reconnected by GameProvider's own reconnect timer, over
+    // and over, even though the tab was perfectly alive. 20s still catches
+    // a genuinely dead phone within a game-relevant timeframe, with far
+    // more slack for a browser's occasional hiccup.
     final handler = Cascade()
-        .add(webSocketHandler(
-          _onConnection,
-          pingInterval: const Duration(seconds: 5),
-        ))
+        .add(
+          webSocketHandler(
+            _onConnection,
+            pingInterval: const Duration(seconds: 20),
+          ),
+        )
         .add(_serveWebApp)
         .handler;
     try {
@@ -175,10 +187,12 @@ class GameServer {
     if (_webApp != null) return;
     try {
       final data = await rootBundle.load('assets/web/web_app.zip');
-      final archive = ZipDecoder().decodeBytes(data.buffer.asUint8List(
-        data.offsetInBytes,
-        data.lengthInBytes,
-      ));
+      final archive = ZipDecoder().decodeBytes(
+        data.buffer.asUint8List(
+          data.offsetInBytes,
+          data.lengthInBytes,
+        ),
+      );
       final files = <String, List<int>>{};
       for (final file in archive.files) {
         if (!file.isFile) continue;
@@ -191,6 +205,27 @@ class GameServer {
   }
 
   Response _serveWebApp(Request request) {
+    // A lightweight identity check for reachability probes (the games list,
+    // mDNS discovery). A bare TCP connect only proves *something* is
+    // listening on that host:port — on the same machine, re-hosting a new
+    // game reuses the same default port, so it would also "succeed" for an
+    // old, unrelated saved game that was never reopened. This confirms the
+    // port is actually still serving that specific game.
+    if (request.url.path == '__digipoly_info') {
+      return Response.ok(
+        jsonEncode({'gameId': _game?.id}),
+        // A web tab's games list probes every saved game's last-known host
+        // for this same badge, which is almost always a *different* origin
+        // than the one the web app itself was served from — the browser
+        // blocks reading a cross-origin response body without this. The
+        // payload here is just a game id, nothing sensitive, so a permissive
+        // origin is fine on a LAN-only app with no auth to protect.
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*',
+        },
+      );
+    }
     final files = _webApp;
     if (files == null) {
       return Response.ok(
@@ -201,10 +236,13 @@ class GameServer {
     if (path.isEmpty || path.endsWith('/')) path = 'index.html';
     final content = files[path];
     if (content == null) return Response.notFound('Not found');
-    return Response.ok(content, headers: {
-      'Content-Type': _contentTypeFor(path),
-      'Cache-Control': 'no-cache',
-    });
+    return Response.ok(
+      content,
+      headers: {
+        'Content-Type': _contentTypeFor(path),
+        'Cache-Control': 'no-cache',
+      },
+    );
   }
 
   static String _contentTypeFor(String path) {
@@ -280,6 +318,8 @@ class GameServer {
             _handleEndTurn(playerId, channel);
           case MessageType.leaveGame:
             _handleLeave(playerId);
+          case MessageType.dismissRoll:
+            _handleDismissRoll(playerId);
           default:
             break;
         }
@@ -303,15 +343,21 @@ class GameServer {
   /// from this connection is ever honored.
   void _handleSpectate(WebSocketChannel channel) {
     if (_game == null) {
-      _send(channel, const WsMessage(MessageType.joinRejected, {
-        'reason': 'Invalid join request.',
-      }));
+      _send(
+        channel,
+        const WsMessage(MessageType.joinRejected, {
+          'reason': 'Invalid join request.',
+        }),
+      );
       return;
     }
     _spectators.add(channel);
-    _send(channel, WsMessage(MessageType.joinAccepted, {
-      'snapshot': _snapshot().toJson(),
-    }));
+    _send(
+      channel,
+      WsMessage(MessageType.joinAccepted, {
+        'snapshot': _snapshot().toJson(),
+      }),
+    );
   }
 
   String? _handleJoin(WebSocketChannel channel, Map<String, dynamic> payload) {
@@ -320,9 +366,12 @@ class GameServer {
     final name = (payload['name'] as String? ?? '').trim();
 
     if (game == null || playerId == null || playerId.isEmpty) {
-      _send(channel, const WsMessage(MessageType.joinRejected, {
-        'reason': 'Invalid join request.',
-      }));
+      _send(
+        channel,
+        const WsMessage(MessageType.joinRejected, {
+          'reason': 'Invalid join request.',
+        }),
+      );
       return null;
     }
 
@@ -344,6 +393,12 @@ class GameServer {
             hasLeft: false,
           );
     _players[playerId] = player;
+    // A rejoin after an explicit "Leave game" gets the same heads-up as a
+    // first-time join, not the silent presenceChanged a mid-game reconnect
+    // (dropped wifi, killed app) gets — the player record (seat/balance)
+    // persists either way, so this only changes which broadcast fires,
+    // never which branch above builds the player.
+    final rejoined = existing != null && existing.hasLeft;
 
     // The first player to ever join opens the turn rotation.
     if (_currentTurnId == null) {
@@ -358,12 +413,17 @@ class GameServer {
 
     _db.upsertPlayers(game.id, [player]);
 
-    _send(channel, WsMessage(MessageType.joinAccepted, {
-      'snapshot': _snapshot().toJson(),
-    }));
+    _send(
+      channel,
+      WsMessage(MessageType.joinAccepted, {
+        'snapshot': _snapshot().toJson(),
+      }),
+    );
     _broadcast(
       WsMessage(
-        isNew ? MessageType.playerJoined : MessageType.presenceChanged,
+        isNew || rejoined
+            ? MessageType.playerJoined
+            : MessageType.presenceChanged,
         {'player': player.toJson()},
       ),
       except: playerId,
@@ -405,11 +465,13 @@ class GameServer {
     _db.upsertPlayers(game.id, result.requireValue);
     _db.insertTransactions(game.id, [tx]);
 
-    _broadcast(WsMessage(MessageType.paymentApplied, {
-      'transaction': tx.toJson(),
-      'players': _players.values.map((p) => p.toJson()).toList(),
-      'freeParkingPot': _freeParkingPot,
-    }));
+    _broadcast(
+      WsMessage(MessageType.paymentApplied, {
+        'transaction': tx.toJson(),
+        'players': _players.values.map((p) => p.toJson()).toList(),
+        'freeParkingPot': _freeParkingPot,
+      }),
+    );
     return true;
   }
 
@@ -425,12 +487,12 @@ class GameServer {
     if (_transactions.any((tx) => tx.id == txId)) return null;
 
     void reject(String reason) => _send(
-          channel,
-          WsMessage(MessageType.paymentRejected, {
-            'txId': txId,
-            'reason': reason,
-          }),
-        );
+      channel,
+      WsMessage(MessageType.paymentRejected, {
+        'txId': txId,
+        'reason': reason,
+      }),
+    );
 
     final sender = _players[senderId];
     if (_game == null || sender == null || sender.hasLeft) {
@@ -470,7 +532,8 @@ class GameServer {
     );
 
     final request = requestId == null ? null : _pendingRequests[requestId];
-    final settlesRequest = request != null &&
+    final settlesRequest =
+        request != null &&
         request.targetId == senderId &&
         request.requesterId == tx.toId;
 
@@ -481,7 +544,8 @@ class GameServer {
         _resolveRequest(
           request,
           accepted: false,
-          reason: '${_players[senderId]?.name ?? 'They'} accepted but '
+          reason:
+              '${_players[senderId]?.name ?? 'They'} accepted but '
               'does not have enough money.',
         );
       }
@@ -509,9 +573,10 @@ class GameServer {
   }
 
   /// Edits a past transaction's note — the amount and parties never change.
-  /// Either party to a plain send/request may add or correct it, any time;
-  /// other transaction types carry a system-assigned label instead of a
-  /// free-form note, so they aren't editable.
+  /// Only whoever actually made the transaction (`GameTransaction.makerId`)
+  /// may add or correct it, any time; other transaction types carry a
+  /// system-assigned label instead of a free-form note, so they aren't
+  /// editable.
   void _handleEditTransactionNote(
     String senderId,
     WebSocketChannel channel,
@@ -528,7 +593,7 @@ class GameServer {
       return;
     }
     final target = _transactions[index];
-    if (target.fromId != senderId && target.toId != senderId) {
+    if (target.makerId != senderId) {
       reject('You can only edit notes on your own transactions.');
       return;
     }
@@ -545,10 +610,12 @@ class GameServer {
     _transactions[index] = updated;
     _db.insertTransactions(_game!.id, [updated]);
 
-    _broadcast(WsMessage(MessageType.transactionNoteUpdated, {
-      'txId': txId,
-      'transaction': updated.toJson(),
-    }));
+    _broadcast(
+      WsMessage(MessageType.transactionNoteUpdated, {
+        'txId': txId,
+        'transaction': updated.toJson(),
+      }),
+    );
   }
 
   void _handleBuy(
@@ -595,9 +662,11 @@ class GameServer {
     );
     _ownerships[propertyId] = ownership;
     _db.upsertOwnerships(_game!.id, [ownership]);
-    _broadcast(WsMessage(MessageType.propertyChanged, {
-      'ownership': ownership.toJson(),
-    }));
+    _broadcast(
+      WsMessage(MessageType.propertyChanged, {
+        'ownership': ownership.toJson(),
+      }),
+    );
   }
 
   // ------------------------------------------------------------- Auctions
@@ -610,14 +679,20 @@ class GameServer {
   }
 
   void _rejectAuction(String senderId, String propertyId, String reason) =>
-      _sendTo(senderId, WsMessage(MessageType.auctionRejected, {
-        'propertyId': propertyId,
-        'reason': reason,
-      }));
+      _sendTo(
+        senderId,
+        WsMessage(MessageType.auctionRejected, {
+          'propertyId': propertyId,
+          'reason': reason,
+        }),
+      );
 
-  /// Starts a live auction for an unowned property — not turn-gated, since
-  /// auctions arise on other players' turns (someone else declined to buy).
-  /// Anyone can start one and everyone watching sees it live.
+  /// Starts a live auction for an unowned property — mirrors the official
+  /// rule exactly: only the player standing on it, on their own turn, can
+  /// decline to buy and send it to auction (everyone else just watches and
+  /// bids once it's running). No free-form "auction any property, anytime"
+  /// path — that would let a player force a sale on a square they have no
+  /// actual claim to.
   void _handleStartAuction(String senderId, Map<String, dynamic> payload) {
     final sender = _players[senderId];
     if (sender == null || sender.hasLeft) return;
@@ -629,8 +704,33 @@ class GameServer {
       return;
     }
     if (_ownerships.containsKey(propertyId)) {
-      _rejectAuction(senderId, propertyId, '${property.name} is already owned.');
+      _rejectAuction(
+        senderId,
+        propertyId,
+        '${property.name} is already owned.',
+      );
       return;
+    }
+    if (senderId != _currentTurnId) {
+      _rejectAuction(
+        senderId,
+        propertyId,
+        'You can only decline to auction on your own turn.',
+      );
+      return;
+    }
+    // Boards with no curated layout track no position at all — the "must
+    // be standing on it" restriction only applies where position is real.
+    if (_game!.board.goIndex >= 0) {
+      final index = _game!.board.properties.indexOf(property);
+      if (sender.position != index) {
+        _rejectAuction(
+          senderId,
+          propertyId,
+          "You can only auction the square you're standing on.",
+        );
+        return;
+      }
     }
     if (_auctions.containsKey(propertyId)) {
       _rejectAuction(
@@ -640,12 +740,31 @@ class GameServer {
       );
       return;
     }
+    // Only one live auction at a time across the whole table — juggling
+    // several at once split attention and bids between them for no real
+    // benefit. Whoever's turn it is (or whoever started the first one)
+    // finishes that one before another can start.
+    if (_auctions.isNotEmpty) {
+      final runningId = _auctions.keys.first;
+      final runningName = _findProperty(runningId)?.name ?? 'another property';
+      _rejectAuction(
+        senderId,
+        propertyId,
+        'Finish the auction for $runningName before starting another.',
+      );
+      return;
+    }
 
-    final auction = PropertyAuction(propertyId: propertyId, startedBy: senderId);
+    final auction = PropertyAuction(
+      propertyId: propertyId,
+      startedBy: senderId,
+    );
     _auctions[propertyId] = auction;
-    _broadcast(WsMessage(MessageType.auctionStarted, {
-      'auction': auction.toJson(),
-    }));
+    _broadcast(
+      WsMessage(MessageType.auctionStarted, {
+        'auction': auction.toJson(),
+      }),
+    );
   }
 
   /// Raises the bid on a running auction. No turn order — anyone can raise
@@ -657,7 +776,11 @@ class GameServer {
     final propertyId = payload['propertyId'] as String? ?? '';
     final auction = _auctions[propertyId];
     if (auction == null) {
-      _rejectAuction(senderId, propertyId, 'That auction is no longer running.');
+      _rejectAuction(
+        senderId,
+        propertyId,
+        'That auction is no longer running.',
+      );
       return;
     }
     final amount = payload['amount'] as int? ?? 0;
@@ -674,12 +797,16 @@ class GameServer {
       return;
     }
 
-    final updated =
-        auction.copyWith(currentBid: amount, currentBidderId: senderId);
+    final updated = auction.copyWith(
+      currentBid: amount,
+      currentBidderId: senderId,
+    );
     _auctions[propertyId] = updated;
-    _broadcast(WsMessage(MessageType.auctionBid, {
-      'auction': updated.toJson(),
-    }));
+    _broadcast(
+      WsMessage(MessageType.auctionBid, {
+        'auction': updated.toJson(),
+      }),
+    );
   }
 
   /// Closes a running auction — anyone can, not just the one who started
@@ -696,10 +823,12 @@ class GameServer {
     final bidderId = auction.currentBidderId;
     final bidder = bidderId == null ? null : _players[bidderId];
     if (bidderId == null || bidder == null || bidder.hasLeft) {
-      _broadcast(WsMessage(MessageType.auctionClosed, {
-        'propertyId': propertyId,
-        'cancelled': true,
-      }));
+      _broadcast(
+        WsMessage(MessageType.auctionClosed, {
+          'propertyId': propertyId,
+          'cancelled': true,
+        }),
+      );
       return;
     }
 
@@ -710,8 +839,11 @@ class GameServer {
     // for anyone, handled above).
     if (senderId == bidderId) {
       _auctions[propertyId] = auction;
-      _rejectAuction(senderId, propertyId,
-          'Someone else needs to close this — you\'re the leading bidder.');
+      _rejectAuction(
+        senderId,
+        propertyId,
+        'Someone else needs to close this — you\'re the leading bidder.',
+      );
       return;
     }
 
@@ -723,11 +855,13 @@ class GameServer {
       price: auction.currentBid,
     );
     if (!validated.isOk) {
-      _broadcast(WsMessage(MessageType.auctionClosed, {
-        'propertyId': propertyId,
-        'cancelled': true,
-        'reason': validated.error,
-      }));
+      _broadcast(
+        WsMessage(MessageType.auctionClosed, {
+          'propertyId': propertyId,
+          'cancelled': true,
+          'reason': validated.error,
+        }),
+      );
       return;
     }
 
@@ -743,24 +877,33 @@ class GameServer {
       note: 'Auction',
     );
     if (!_applyTransaction(tx, (_) {})) {
-      _broadcast(WsMessage(MessageType.auctionClosed, {
-        'propertyId': propertyId,
-        'cancelled': true,
-      }));
+      _broadcast(
+        WsMessage(MessageType.auctionClosed, {
+          'propertyId': propertyId,
+          'cancelled': true,
+        }),
+      );
       return;
     }
 
-    final ownership = PropertyOwnership(propertyId: propertyId, ownerId: bidderId);
+    final ownership = PropertyOwnership(
+      propertyId: propertyId,
+      ownerId: bidderId,
+    );
     _ownerships[propertyId] = ownership;
     _db.upsertOwnerships(_game!.id, [ownership]);
-    _broadcast(WsMessage(MessageType.propertyChanged, {
-      'ownership': ownership.toJson(),
-    }));
-    _broadcast(WsMessage(MessageType.auctionClosed, {
-      'propertyId': propertyId,
-      'winnerId': bidderId,
-      'amount': auction.currentBid,
-    }));
+    _broadcast(
+      WsMessage(MessageType.propertyChanged, {
+        'ownership': ownership.toJson(),
+      }),
+    );
+    _broadcast(
+      WsMessage(MessageType.auctionClosed, {
+        'propertyId': propertyId,
+        'winnerId': bidderId,
+        'amount': auction.currentBid,
+      }),
+    );
   }
 
   void _handlePayRent(
@@ -793,10 +936,29 @@ class GameServer {
       return;
     }
     if (ownership.ownerId == payerId) {
-      reject(payerId == senderId
-          ? 'You own this property — no rent due.'
-          : 'They own this property — no rent due.');
+      reject(
+        payerId == senderId
+            ? 'You own this property — no rent due.'
+            : 'They own this property — no rent due.',
+      );
       return;
+    }
+
+    // Rent is only owed by whoever's actually standing on the square — not
+    // just anyone who happens to own another property somewhere else.
+    // Boards with no curated layout track no position at all, so this
+    // restriction doesn't apply there (same exemption a plain buy gets).
+    if (_game!.board.goIndex >= 0) {
+      final property = _findProperty(propertyId);
+      if (property != null &&
+          payer.position != _game!.board.properties.indexOf(property)) {
+        reject(
+          payerId == senderId
+              ? "You're not standing on ${property.name}."
+              : "${payer.name} isn't standing on ${property.name}.",
+        );
+        return;
+      }
     }
 
     // Utilities need the dice; the payer's own in-app roll is used
@@ -873,13 +1035,14 @@ class GameServer {
     );
     if (!applied) return;
 
-    final ownership =
-        _ownerships[propertyId]!.copyWith(houses: targetHouses);
+    final ownership = _ownerships[propertyId]!.copyWith(houses: targetHouses);
     _ownerships[propertyId] = ownership;
     _db.upsertOwnerships(_game!.id, [ownership]);
-    _broadcast(WsMessage(MessageType.propertyChanged, {
-      'ownership': ownership.toJson(),
-    }));
+    _broadcast(
+      WsMessage(MessageType.propertyChanged, {
+        'ownership': ownership.toJson(),
+      }),
+    );
   }
 
   void _handleMortgage(
@@ -924,13 +1087,14 @@ class GameServer {
     );
     if (!applied) return;
 
-    final ownership =
-        _ownerships[propertyId]!.copyWith(mortgaged: mortgage);
+    final ownership = _ownerships[propertyId]!.copyWith(mortgaged: mortgage);
     _ownerships[propertyId] = ownership;
     _db.upsertOwnerships(_game!.id, [ownership]);
-    _broadcast(WsMessage(MessageType.propertyChanged, {
-      'ownership': ownership.toJson(),
-    }));
+    _broadcast(
+      WsMessage(MessageType.propertyChanged, {
+        'ownership': ownership.toJson(),
+      }),
+    );
   }
 
   /// Hands a property to another player — the property side of a trade;
@@ -980,11 +1144,13 @@ class GameServer {
     _transactions.add(tx);
     _db.insertTransactions(_game!.id, [tx]);
 
-    _broadcast(WsMessage(MessageType.propertyChanged, {
-      'ownership': ownership.toJson(),
-      'transaction': tx.toJson(),
-      'txId': txId,
-    }));
+    _broadcast(
+      WsMessage(MessageType.propertyChanged, {
+        'ownership': ownership.toJson(),
+        'transaction': tx.toJson(),
+        'txId': txId,
+      }),
+    );
   }
 
   void _handleMoneyRequest(
@@ -998,13 +1164,13 @@ class GameServer {
     if (requestId == null || _pendingRequests.containsKey(requestId)) return;
 
     void resolve(bool accepted, [String? reason]) => _send(
-          channel,
-          WsMessage(MessageType.moneyRequestResolved, {
-            'requestId': requestId,
-            'accepted': accepted,
-            'reason': ?reason,
-          }),
-        );
+      channel,
+      WsMessage(MessageType.moneyRequestResolved, {
+        'requestId': requestId,
+        'accepted': accepted,
+        'reason': ?reason,
+      }),
+    );
 
     final target = _players[targetId];
     if (target == null || target.hasLeft) {
@@ -1101,12 +1267,26 @@ class GameServer {
       turnRolled: _turnRolled,
       freeParkingPot: _freeParkingPot,
     );
-    _broadcast(WsMessage(MessageType.diceRolled, {
-      'roll': roll.toJson(),
-      'turnRolled': _turnRolled,
-      'players': _players.values.map((p) => p.toJson()).toList(),
-      'freeParkingPot': _freeParkingPot,
-    }));
+    _broadcast(
+      WsMessage(MessageType.diceRolled, {
+        'roll': roll.toJson(),
+        'turnRolled': _turnRolled,
+        'players': _players.values.map((p) => p.toJson()).toList(),
+        'freeParkingPot': _freeParkingPot,
+      }),
+    );
+  }
+
+  /// A drawer's device sends this right as its own copy of a just-drawn
+  /// Chance/Community Chest card's dialog is about to show — a pure relay,
+  /// moves no state — so everyone else knows it's fine to reveal that same
+  /// card instead of guessing how long to wait. Matters most for a card
+  /// drawn off a dice roll: the server resolves the landing (and broadcasts
+  /// the card) inside the same call that produces the roll broadcast, so
+  /// the card reaches every other device before the roller has necessarily
+  /// even seen their own dice result yet.
+  void _handleDismissRoll(String senderId) {
+    _broadcast(WsMessage(MessageType.rollDismissed, {'playerId': senderId}));
   }
 
   /// Advances [player]'s token by [total] squares, auto-pays salary if GO
@@ -1166,10 +1346,13 @@ class GameServer {
         );
         final applied = _applyTransaction(
           tx,
-          (reason) => _sendTo(player.id, WsMessage(MessageType.paymentRejected, {
-            'txId': tx.id,
-            'reason': reason,
-          })),
+          (reason) => _sendTo(
+            player.id,
+            WsMessage(MessageType.paymentRejected, {
+              'txId': tx.id,
+              'reason': reason,
+            }),
+          ),
           viewerId: player.id,
         );
         if (applied) _freeParkingPot += amount;
@@ -1240,10 +1423,13 @@ class GameServer {
         );
         final applied = _applyTransaction(
           tx,
-          (reason) => _sendTo(freed.id, WsMessage(MessageType.paymentRejected, {
-            'txId': tx.id,
-            'reason': reason,
-          })),
+          (reason) => _sendTo(
+            freed.id,
+            WsMessage(MessageType.paymentRejected, {
+              'txId': tx.id,
+              'reason': reason,
+            }),
+          ),
           viewerId: freed.id,
         );
         if (applied) _freeParkingPot += game.board.jailFine;
@@ -1327,10 +1513,12 @@ class GameServer {
     _db.upsertPlayers(_game!.id, [freed]);
     _returnJailCard();
 
-    _broadcast(WsMessage(MessageType.jailCardUsed, {
-      'txId': txId,
-      'player': freed.toJson(),
-    }));
+    _broadcast(
+      WsMessage(MessageType.jailCardUsed, {
+        'txId': txId,
+        'player': freed.toJson(),
+      }),
+    );
   }
 
   /// Puts one held-out jail card back into circulation — whichever deck it
@@ -1369,8 +1557,9 @@ class GameServer {
   void _drawCardFor(String playerId, String deck) {
     final game = _game!;
     final board = game.board;
-    final cards =
-        deck == 'chest' ? board.communityChestCards : board.chanceCards;
+    final cards = deck == 'chest'
+        ? board.communityChestCards
+        : board.chanceCards;
     if (cards.isEmpty) return;
     final card = _drawFromDeck(deck, cards);
 
@@ -1380,12 +1569,12 @@ class GameServer {
     final moveTarget = card.moveToPropertyId;
     final moveBy = card.moveBySpaces;
     if (moveTarget != null && board.goIndex >= 0) {
-      final targetIndex =
-          board.properties.indexWhere((p) => p.id == moveTarget);
+      final targetIndex = board.properties.indexWhere(
+        (p) => p.id == moveTarget,
+      );
       final mover = _players[playerId];
       if (targetIndex >= 0 && mover != null && !mover.inJail) {
-        final total =
-            (targetIndex - mover.position) % board.properties.length;
+        final total = (targetIndex - mover.position) % board.properties.length;
         // A "Go to Jail" card is a direct teleport, not a real trip around
         // the board — never collects GO even if the forward path crosses
         // it, same as landing on the Go To Jail square itself.
@@ -1429,15 +1618,17 @@ class GameServer {
           )
         : card.amount;
 
-    _broadcast(WsMessage(MessageType.cardDrawn, {
-      'playerId': playerId,
-      'deck': deck,
-      'card': card.toJson(),
-      'players': _players.values.map((p) => p.toJson()).toList(),
-      // Only meaningful for a repairs card — everyone else can read the
-      // amount straight off the card itself.
-      if (card.isBuildingRepairs) 'chargedAmount': chargedAmount,
-    }));
+    _broadcast(
+      WsMessage(MessageType.cardDrawn, {
+        'playerId': playerId,
+        'deck': deck,
+        'card': card.toJson(),
+        'players': _players.values.map((p) => p.toJson()).toList(),
+        // Only meaningful for a repairs card — everyone else can read the
+        // amount straight off the card itself.
+        if (card.isBuildingRepairs) 'chargedAmount': chargedAmount,
+      }),
+    );
 
     if (chargedAmount == 0) return;
     final tx = GameTransaction(
@@ -1479,8 +1670,10 @@ class GameServer {
   void _advanceTurn() {
     final game = _game;
     if (game == null) return;
-    _currentTurnId =
-        GameEngine.nextTurn(_players.values.toList(), _currentTurnId);
+    _currentTurnId = GameEngine.nextTurn(
+      _players.values.toList(),
+      _currentTurnId,
+    );
     _turnRolled = false;
     _db.setTurnState(
       game.id,
@@ -1489,9 +1682,11 @@ class GameServer {
       turnRolled: false,
       freeParkingPot: _freeParkingPot,
     );
-    _broadcast(WsMessage(MessageType.turnChanged, {
-      'playerId': _currentTurnId,
-    }));
+    _broadcast(
+      WsMessage(MessageType.turnChanged, {
+        'playerId': _currentTurnId,
+      }),
+    );
   }
 
   void _handleLeave(String playerId) {
@@ -1522,22 +1717,24 @@ class GameServer {
     _players[playerId] = offline;
     _db.upsertPlayers(game.id, [offline]);
 
-    _broadcast(WsMessage(MessageType.presenceChanged, {
-      'player': offline.toJson(),
-    }));
+    _broadcast(
+      WsMessage(MessageType.presenceChanged, {
+        'player': offline.toJson(),
+      }),
+    );
   }
 
   GameSnapshot _snapshot() => GameSnapshot(
-        game: _game!,
-        players: _players.values.toList(),
-        transactions: List.of(_transactions),
-        ownerships: _ownerships.values.toList(),
-        currentTurnId: _currentTurnId,
-        lastRoll: _lastRoll,
-        turnRolled: _turnRolled,
-        freeParkingPot: _freeParkingPot,
-        auctions: _auctions.values.toList(),
-      );
+    game: _game!,
+    players: _players.values.toList(),
+    transactions: List.of(_transactions),
+    ownerships: _ownerships.values.toList(),
+    currentTurnId: _currentTurnId,
+    lastRoll: _lastRoll,
+    turnRolled: _turnRolled,
+    freeParkingPot: _freeParkingPot,
+    auctions: _auctions.values.toList(),
+  );
 
   void _send(WebSocketChannel channel, WsMessage message) =>
       channel.sink.add(message.encode());

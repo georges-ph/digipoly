@@ -5,12 +5,14 @@ import 'package:provider/provider.dart';
 import '../models/result.dart';
 import '../providers/game_provider.dart';
 import '../services/discovery_service.dart';
-import '../services/game_server.dart';
 import '../theme/app_theme.dart';
+import '../utils/join_address.dart';
 import '../utils/snack.dart';
 import '../widgets/section_header.dart';
 import 'dashboard_screen.dart';
 import 'game_screen.dart';
+import 'scan_join_screen.dart';
+import 'scan_pay_screen.dart' show canScanQr;
 
 /// Rooms discovered on the local network via mDNS, plus a manual
 /// address fallback for networks that block multicast.
@@ -94,29 +96,33 @@ class _JoinGameScreenState extends State<JoinGameScreen> {
     final text = _addressController.text.trim();
     if (text.isEmpty) return;
 
-    String host;
-    int? port;
-    final uri = Uri.tryParse(text);
-    if (uri != null && uri.hasScheme && uri.host.isNotEmpty) {
-      // A pasted join link: http://<ip>:<port>/
-      host = uri.queryParameters['host'] ?? uri.host;
-      port = int.tryParse(uri.queryParameters['port'] ?? '') ??
-          (uri.hasPort ? uri.port : GameServer.defaultPort);
-    } else {
-      final parts = text.split(':');
-      host = parts.first.trim();
-      port = parts.length > 1
-          ? int.tryParse(parts[1].trim())
-          : GameServer.defaultPort;
-    }
-    if (host.isEmpty || port == null) {
+    final address = parseJoinAddress(text);
+    if (address == null) {
       showSnack(
           context,
           'Enter an address like 192.168.1.24, or paste '
           'the join link.');
       return;
     }
-    _join(host, port, 'manual');
+    _join(address.host, address.port, 'manual');
+  }
+
+  String _emptyStateHint() {
+    if (kIsWeb) return 'Ask the host for the room address and type it above to join.';
+    if (canScanQr) {
+      return 'Make sure you are on the same wifi as the host. If nothing '
+          'shows up, scan their room QR or type their address in above.';
+    }
+    return 'Make sure you are on the same wifi as the host. If nothing '
+        'shows up, ask the host for the room address and type it above.';
+  }
+
+  Future<void> _scanQr() async {
+    final address = await Navigator.of(context).push<({String host, int port})>(
+      MaterialPageRoute(builder: (_) => const ScanJoinScreen()),
+    );
+    if (address == null || !mounted) return;
+    _join(address.host, address.port, 'scan');
   }
 
   @override
@@ -140,9 +146,24 @@ class _JoinGameScreenState extends State<JoinGameScreen> {
                   child: TextField(
                     controller: _addressController,
                     keyboardType: TextInputType.url,
-                    decoration: const InputDecoration(
+                    decoration: InputDecoration(
                       labelText: 'Host address',
                       hintText: '192.168.1.24 or a join link',
+                      suffixIcon: canScanQr
+                          ? IconButton(
+                              tooltip: "Scan the host's room QR",
+                              onPressed: _joiningKey == null ? _scanQr : null,
+                              icon: _joiningKey == 'scan'
+                                  ? const SizedBox(
+                                      width: 18,
+                                      height: 18,
+                                      child: CircularProgressIndicator(
+                                          strokeWidth: 2),
+                                    )
+                                  : const Icon(
+                                      Icons.qr_code_scanner_rounded),
+                            )
+                          : null,
                     ),
                     onSubmitted: (_) => _joinManual(),
                   ),
@@ -217,12 +238,7 @@ class _JoinGameScreenState extends State<JoinGameScreen> {
                         ),
                         const SizedBox(height: 8),
                         Text(
-                          kIsWeb
-                              ? 'Ask the host for the room address and type '
-                                  'it above to join.'
-                              : 'Make sure you are on the same wifi as the '
-                                  'host. If nothing shows up, ask the host '
-                                  'for the room address and type it above.',
+                          _emptyStateHint(),
                           textAlign: TextAlign.center,
                           style: textTheme.bodySmall?.copyWith(
                             color: scheme.onSurfaceVariant,

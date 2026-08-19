@@ -1,4 +1,4 @@
-import 'dart:io';
+import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -11,6 +11,7 @@ import '../services/game_client.dart';
 import '../services/identity_service.dart';
 import '../theme/app_theme.dart';
 import '../utils/formatting.dart';
+import '../utils/game_reachability.dart';
 import '../utils/snack.dart';
 import '../widgets/empty_state.dart';
 import '../widgets/name_sheet.dart';
@@ -30,11 +31,13 @@ class GamesTab extends StatefulWidget {
 class _GamesTabState extends State<GamesTab> {
   // "Live" for the game this device is actually connected to comes straight
   // off GameProvider. For every *other* saved game, the only way to know
-  // whether its host is currently up is to ask — a quick, bounded TCP probe
-  // per record (same idea discovery_service already uses for mDNS-found
-  // rooms), so a game hosted elsewhere shows as live without having to be
-  // opened first. Keyed by game id.
+  // whether its host is currently up is to ask — a quick, bounded reachability
+  // probe per record (same idea discovery_service already uses for mDNS-found
+  // rooms; see utils/game_reachability.dart for the platform split), so a
+  // game hosted elsewhere shows as live without having to be opened first.
+  // Keyed by game id.
   final Map<String, bool> _reachable = {};
+  Timer? _probeTimer;
 
   @override
   void initState() {
@@ -48,42 +51,46 @@ class _GamesTabState extends State<GamesTab> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _probeReachability();
     });
+    // A one-shot probe only reflects reachability at the moment the app was
+    // opened — a friend who starts hosting a few seconds later would show
+    // as offline until something else (a pull-to-refresh) re-checks. Keep
+    // re-probing while this tab is actually on screen so the Live badge
+    // stays trustworthy without the player having to think about it —
+    // this is exactly what decides which room in the list to tap into.
+    _probeTimer = Timer.periodic(
+      const Duration(seconds: 8),
+      (_) => _probeReachability(),
+    );
   }
 
   @override
   void dispose() {
     context.read<GamesProvider>().removeListener(_probeReachability);
+    _probeTimer?.cancel();
     super.dispose();
   }
 
   Future<void> _probeReachability() async {
-    final session = context.read<GameProvider>();
+    if (!(ModalRoute.of(context)?.isCurrent ?? true)) return;
     final records = context.read<GamesProvider>().records;
-    await Future.wait(records.map((record) async {
-      // The currently-connected game already has a real answer and doesn't
-      // need a guess. Only client records carry a host to probe — a hosted
-      // game is only live if this device is actually running it right now.
-      if (record.game.id == session.record?.game.id) return;
-      final host = record.hostAddress;
-      final port = record.hostPort;
-      if (host == null || port == null) return;
-      final reachable = await _probe(host, port);
-      if (mounted) setState(() => _reachable[record.game.id] = reachable);
-    }));
-  }
-
-  Future<bool> _probe(String host, int port) async {
-    try {
-      final socket = await Socket.connect(
-        host,
-        port,
-        timeout: const Duration(seconds: 2),
-      );
-      socket.destroy();
-      return true;
-    } catch (_) {
-      return false;
-    }
+    // Every record gets probed, including whichever one this device is
+    // currently connected to — GameClient has no ping/heartbeat of its own,
+    // so if the host vanishes without a clean socket close (killed, network
+    // drop) ClientStatus can stay stuck on "connected" for a long time. A
+    // fresh check is the only way to catch that; see the override below.
+    await Future.wait(
+      records.map((record) async {
+        final host = record.hostAddress;
+        final port = record.hostPort;
+        if (host == null || port == null) return;
+        final reachable = await probeGameReachable(
+          host,
+          port,
+          record.game.id,
+        );
+        if (mounted) setState(() => _reachable[record.game.id] = reachable);
+      }),
+    );
   }
 
   Future<void> _openGame(GameRecord record) async {
@@ -100,7 +107,13 @@ class _GamesTabState extends State<GamesTab> {
     await Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => const GameScreen()),
     );
-    if (mounted) context.read<GamesProvider>().load();
+    if (mounted) {
+      context.read<GamesProvider>().load();
+      // Back on this tab (its route is current again) — refresh reachability
+      // right away instead of waiting out the periodic timer, so whichever
+      // room is still active in the background shows correctly straight away.
+      _probeReachability();
+    }
   }
 
   Future<void> _confirmRemove(GameRecord record) async {
@@ -183,14 +196,16 @@ class _GamesTabState extends State<GamesTab> {
             children: [
               Text(
                 identity.hasName ? 'Hi, ${identity.displayName}' : 'Welcome',
-                style: textTheme.headlineSmall
-                    ?.copyWith(fontWeight: FontWeight.w800),
+                style: textTheme.headlineSmall?.copyWith(
+                  fontWeight: FontWeight.w800,
+                ),
               ),
               const SizedBox(height: 2),
               Text(
                 'Ready to bankrupt your friends?',
-                style: textTheme.bodySmall
-                    ?.copyWith(color: scheme.onSurfaceVariant),
+                style: textTheme.bodySmall?.copyWith(
+                  color: scheme.onSurfaceVariant,
+                ),
               ),
             ],
           ),
@@ -209,6 +224,11 @@ class _GamesTabState extends State<GamesTab> {
                     [games.load(), _probeReachability()],
                   ),
                   child: ListView.separated(
+                    // RefreshIndicator arms off an overscroll past the top —
+                    // with few enough games that the list doesn't fill the
+                    // viewport, the default physics never lets it overscroll
+                    // at all, so pull-to-refresh silently does nothing.
+                    physics: const AlwaysScrollableScrollPhysics(),
                     padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
                     itemCount: games.records.length,
                     separatorBuilder: (_, _) => const SizedBox(height: 12),
@@ -216,15 +236,22 @@ class _GamesTabState extends State<GamesTab> {
                       final record = games.records[index];
                       // "Live" means actually connected right now, or (for
                       // every other saved game) its host answering a quick
-                      // reachability probe — a session whose host has
-                      // vanished either way is not live.
-                      final isLive = (session.hasActiveSession &&
-                              session.record?.game.id == record.game.id &&
-                              session.connection == ClientStatus.connected) ||
-                          _reachable[record.game.id] == true;
+                      // reachability probe. A fresh probe result of false
+                      // wins even over "actually connected right now" — the
+                      // socket has no heartbeat of its own, so ClientStatus
+                      // can still read "connected" for a while after a host
+                      // vanishes without a clean close (killed, network
+                      // drop); the TCP probe is the freshest ground truth.
+                      final probedReachable = _reachable[record.game.id];
+                      final isConnectedHere =
+                          session.hasActiveSession &&
+                          session.record?.game.id == record.game.id &&
+                          session.connection == ClientStatus.connected;
+                      final isLive = probedReachable == false
+                          ? false
+                          : (isConnectedHere || probedReachable == true);
                       return _GameCard(
                         record: record,
-                        balance: games.myBalanceIn(record),
                         playerCount: games.playerCountIn(record),
                         isLive: isLive,
                         onTap: () => _openGame(record),
@@ -259,7 +286,7 @@ class _GamesTabState extends State<GamesTab> {
                     ),
                   ],
                 ),
-                const SizedBox(height:16),
+                const SizedBox(height: 16),
                 TextButton.icon(
                   onPressed: _watch,
                   icon: const Icon(Icons.tv_rounded, size: 18),
@@ -277,7 +304,6 @@ class _GamesTabState extends State<GamesTab> {
 class _GameCard extends StatelessWidget {
   const _GameCard({
     required this.record,
-    required this.balance,
     required this.playerCount,
     required this.isLive,
     required this.onTap,
@@ -285,7 +311,6 @@ class _GameCard extends StatelessWidget {
   });
 
   final GameRecord record;
-  final int? balance;
   final int playerCount;
   final bool isLive;
   final VoidCallback onTap;
@@ -296,8 +321,7 @@ class _GameCard extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
     final color = AppColors.avatarColor(record.game.id);
-    final roleLabel =
-        record.role == GameRole.host ? 'Hosting' : 'Joined';
+    final roleLabel = record.role == GameRole.host ? 'Hosting' : 'Joined';
 
     return Card(
       child: InkWell(
@@ -341,11 +365,14 @@ class _GameCard extends StatelessWidget {
                       ],
                     ),
                     const SizedBox(height: 4),
+                    // Role and player count front-loaded, board name last —
+                    // on a cramped width the ellipsis eats the board name
+                    // first rather than hiding the player count, which is
+                    // the thing actually worth glancing at in this list.
                     Text(
-                      '${record.game.board.name} · $roleLabel · '
-                      '$playerCount player${playerCount == 1 ? '' : 's'}',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+                      '$roleLabel · $playerCount '
+                      'player${playerCount == 1 ? '' : 's'} · '
+                      '${record.game.board.name}',
                       style: textTheme.bodySmall?.copyWith(
                         color: scheme.onSurfaceVariant,
                       ),
@@ -354,28 +381,11 @@ class _GameCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 12),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  if (balance != null)
-                    Text(
-                      formatMoney(
-                        balance!,
-                        record.game.board.currencySymbol,
-                      ),
-                      style: textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w800,
-                        color: balance! < 0 ? AppColors.expense : null,
-                      ),
-                    ),
-                  const SizedBox(height: 4),
-                  Text(
-                    formatWhen(record.lastPlayedAt),
-                    style: textTheme.bodySmall?.copyWith(
-                      color: scheme.onSurfaceVariant,
-                    ),
-                  ),
-                ],
+              Text(
+                formatWhen(record.lastPlayedAt),
+                style: textTheme.bodySmall?.copyWith(
+                  color: scheme.onSurfaceVariant,
+                ),
               ),
             ],
           ),
@@ -411,9 +421,9 @@ class _LiveChip extends StatelessWidget {
           Text(
             'Live',
             style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                  color: AppColors.income,
-                  fontWeight: FontWeight.w800,
-                ),
+              color: AppColors.income,
+              fontWeight: FontWeight.w800,
+            ),
           ),
         ],
       ),

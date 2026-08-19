@@ -216,6 +216,11 @@ class GameClient {
 
   void sendLeave() => send(const WsMessage(MessageType.leaveGame));
 
+  /// Tells the table it's fine to reveal a Chance/Community Chest card this
+  /// device just drew — sent right as its own copy of that card's dialog is
+  /// about to show.
+  void sendDismissRoll() => send(const WsMessage(MessageType.dismissRoll));
+
   void _handleClosed(WebSocketChannel channel) {
     if (_channel != channel) return;
     _channel = null;

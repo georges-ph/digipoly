@@ -30,32 +30,35 @@ class BoardsTab extends StatelessWidget {
   Future<void> _newBoard(BuildContext context) async {
     final choice = await showModalBottomSheet<String>(
       context: context,
+      isScrollControlled: true,
       builder: (sheetContext) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: const Icon(Icons.edit_outlined),
-              title: const Text('Start from scratch'),
-              subtitle: const Text('Empty board, add your own properties'),
-              onTap: () => Navigator.pop(sheetContext, 'blank'),
-            ),
-            ListTile(
-              leading: const Icon(Icons.content_paste_rounded),
-              title: const Text('Paste from clipboard'),
-              subtitle: const Text('Import a board someone shared as text'),
-              onTap: () => Navigator.pop(sheetContext, 'paste'),
-            ),
-            ListTile(
-              leading: const Icon(Icons.file_open_outlined),
-              title: const Text('Import from file'),
-              subtitle: const Text(
-                'A .json board file received on WhatsApp, email…',
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.edit_outlined),
+                title: const Text('Start from scratch'),
+                subtitle: const Text('Empty board, add your own properties'),
+                onTap: () => Navigator.pop(sheetContext, 'blank'),
               ),
-              onTap: () => Navigator.pop(sheetContext, 'file'),
-            ),
-            const SizedBox(height: 8),
-          ],
+              ListTile(
+                leading: const Icon(Icons.content_paste_rounded),
+                title: const Text('Paste from clipboard'),
+                subtitle: const Text('Import a board someone shared as text'),
+                onTap: () => Navigator.pop(sheetContext, 'paste'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.file_open_outlined),
+                title: const Text('Import from file'),
+                subtitle: const Text(
+                  'A .json board file received on WhatsApp, email…',
+                ),
+                onTap: () => Navigator.pop(sheetContext, 'file'),
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
         ),
       ),
     );
@@ -124,43 +127,50 @@ class BoardsTab extends StatelessWidget {
     final boards = context.read<BoardsProvider>();
     final action = await showModalBottomSheet<String>(
       context: context,
+      isScrollControlled: true,
       builder: (sheetContext) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: const Icon(Icons.copy_rounded),
-              title: const Text('Duplicate'),
-              onTap: () => Navigator.pop(sheetContext, 'duplicate'),
-            ),
-            ListTile(
-              leading: const Icon(Icons.ios_share_rounded),
-              title: const Text('Copy as text'),
-              subtitle:
-                  const Text('Share it anywhere; others paste it to import'),
-              onTap: () => Navigator.pop(sheetContext, 'share'),
-            ),
-            // Save dialogs only exist on desktop; mobile shares via copy.
-            if (!kIsWeb &&
-                (defaultTargetPlatform == TargetPlatform.windows ||
-                    defaultTargetPlatform == TargetPlatform.linux ||
-                    defaultTargetPlatform == TargetPlatform.macOS))
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
               ListTile(
-                leading: const Icon(Icons.save_alt_rounded),
-                title: const Text('Save as file'),
-                subtitle: const Text('A .json file to send to anyone'),
-                onTap: () => Navigator.pop(sheetContext, 'exportFile'),
+                leading: const Icon(Icons.copy_rounded),
+                title: const Text('Duplicate'),
+                onTap: () => Navigator.pop(sheetContext, 'duplicate'),
               ),
-            ListTile(
-              leading: const Icon(Icons.delete_outline, color: AppColors.expense),
-              title: const Text(
-                'Delete',
-                style: TextStyle(color: AppColors.expense),
+              ListTile(
+                leading: const Icon(Icons.ios_share_rounded),
+                title: const Text('Copy as text'),
+                subtitle: const Text(
+                  'Share it anywhere; others paste it to import',
+                ),
+                onTap: () => Navigator.pop(sheetContext, 'share'),
               ),
-              onTap: () => Navigator.pop(sheetContext, 'delete'),
-            ),
-            const SizedBox(height: 8),
-          ],
+              // Save dialogs only exist on desktop; mobile shares via copy.
+              if (!kIsWeb &&
+                  (defaultTargetPlatform == TargetPlatform.windows ||
+                      defaultTargetPlatform == TargetPlatform.linux ||
+                      defaultTargetPlatform == TargetPlatform.macOS))
+                ListTile(
+                  leading: const Icon(Icons.save_alt_rounded),
+                  title: const Text('Save as file'),
+                  subtitle: const Text('A .json file to send to anyone'),
+                  onTap: () => Navigator.pop(sheetContext, 'exportFile'),
+                ),
+              ListTile(
+                leading: const Icon(
+                  Icons.delete_outline,
+                  color: AppColors.expense,
+                ),
+                title: const Text(
+                  'Delete',
+                  style: TextStyle(color: AppColors.expense),
+                ),
+                onTap: () => Navigator.pop(sheetContext, 'delete'),
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
         ),
       ),
     );
@@ -168,8 +178,9 @@ class BoardsTab extends StatelessWidget {
 
     switch (action) {
       case 'duplicate':
-        final copy = Board.fromJson(board.toJson()..['id'] = const Uuid().v4())
-            .copyWith(name: '${board.name} (copy)');
+        final copy = Board.fromJson(
+          board.toJson()..['id'] = const Uuid().v4(),
+        ).copyWith(name: '${board.name} (copy)');
         await boards.saveBoard(copy);
       case 'share':
         await Clipboard.setData(
@@ -179,8 +190,7 @@ class BoardsTab extends StatelessWidget {
           showSnack(context, 'Board copied — paste it to a friend');
         }
       case 'exportFile':
-        final safeName =
-            board.name.replaceAll(RegExp(r'[^\w\- ]'), '').trim();
+        final safeName = board.name.replaceAll(RegExp(r'[^\w\- ]'), '').trim();
         final location = await getSaveLocation(
           suggestedName:
               '${safeName.isEmpty ? 'board' : safeName}.digipoly.json',
@@ -189,8 +199,7 @@ class BoardsTab extends StatelessWidget {
           ],
         );
         if (location == null) return;
-        await File(location.path)
-            .writeAsString(jsonEncode(board.toJson()));
+        await File(location.path).writeAsString(jsonEncode(board.toJson()));
         if (context.mounted) {
           showSnack(context, 'Board saved — send the file to anyone');
         }
@@ -344,8 +353,7 @@ class _BoardCard extends StatelessWidget {
                   ],
                 ),
               ),
-              Icon(Icons.chevron_right_rounded,
-                  color: scheme.onSurfaceVariant),
+              Icon(Icons.chevron_right_rounded, color: scheme.onSurfaceVariant),
             ],
           ),
         ),

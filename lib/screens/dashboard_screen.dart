@@ -48,8 +48,7 @@ class _DashboardBody extends StatelessWidget {
 
     final scheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
-    final players =
-        session.players.where((p) => !p.hasLeft).toList();
+    final players = session.players.where((p) => !p.hasLeft).toList();
     final turnPlayer = session.currentTurnPlayer;
 
     final playersPane = SingleChildScrollView(
@@ -60,16 +59,18 @@ class _DashboardBody extends StatelessWidget {
           if (turnPlayer != null) ...[
             Container(
               width: double.infinity,
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
               decoration: BoxDecoration(
                 gradient: AppColors.heroGradient,
                 borderRadius: BorderRadius.circular(18),
               ),
               child: Row(
                 children: [
-                  const Icon(Icons.casino_rounded,
-                      color: Colors.white, size: 26),
+                  const Icon(
+                    Icons.casino_rounded,
+                    color: Colors.white,
+                    size: 26,
+                  ),
                   const SizedBox(width: 12),
                   Expanded(
                     child: Text(
@@ -129,8 +130,9 @@ class _DashboardBody extends StatelessWidget {
             const SizedBox(height: 20),
             Text(
               'Board',
-              style:
-                  textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
+              style: textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w800,
+              ),
             ),
             const SizedBox(height: 12),
             BoardLayoutView(
@@ -157,15 +159,23 @@ class _DashboardBody extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(20, 20, 20, 8),
           child: Text(
             'Activity',
-            style:
-                textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
+            style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
           ),
         ),
         Expanded(
-          child: ListView(
-            padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
-            children: buildActivityFeed(context, session, limit: 30),
-          ),
+          child: session.transactions.isEmpty
+              ? Center(
+                  child: Text(
+                    'No transactions yet.',
+                    style: textTheme.bodyMedium?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                )
+              : ListView(
+                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+                  children: buildActivityFeed(context, session, limit: 30),
+                ),
         ),
       ],
     );
@@ -262,8 +272,9 @@ class _PlayerCard extends StatelessWidget {
                   player.id == session.myPlayerId ? 'You' : player.name,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: textTheme.titleSmall
-                      ?.copyWith(fontWeight: FontWeight.w800),
+                  style: textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w800,
+                  ),
                 ),
               ),
             ],
@@ -285,8 +296,9 @@ class _PlayerCard extends StatelessWidget {
           if (owned.isEmpty)
             Text(
               'No properties',
-              style: textTheme.bodySmall
-                  ?.copyWith(color: scheme.onSurfaceVariant),
+              style: textTheme.bodySmall?.copyWith(
+                color: scheme.onSurfaceVariant,
+              ),
             )
           else
             Wrap(

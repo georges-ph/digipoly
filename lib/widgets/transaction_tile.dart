@@ -26,7 +26,8 @@ class TransactionTile extends StatelessWidget {
   final String Function(String accountId) nameOf;
   final String Function(String propertyId)? propertyNameOf;
 
-  /// My balance right after this transaction, to follow the money over time.
+  /// The balance right after this transaction, to follow the money over
+  /// time — whose balance depends on the row (see `activity_feed.dart`).
   final int? balanceAfter;
 
   final VoidCallback? onTap;
@@ -86,19 +87,20 @@ class TransactionTile extends StatelessWidget {
   }
 
   IconData _icon(bool incoming, bool outgoing) => switch (transaction.type) {
-        TransactionType.purchase => Icons.shopping_bag_outlined,
-        TransactionType.rent => Icons.real_estate_agent_outlined,
-        TransactionType.salary => Icons.flag_rounded,
-        TransactionType.house => Icons.home_rounded,
-        TransactionType.card => Icons.style_rounded,
-        TransactionType.mortgage => Icons.account_balance_outlined,
-        TransactionType.tax => Icons.receipt_long_outlined,
-        TransactionType.freeParking => Icons.local_parking_rounded,
-        TransactionType.transfer => Icons.swap_horiz_rounded,
-        _ => incoming
-            ? Icons.south_west_rounded
-            : (outgoing ? Icons.north_east_rounded : Icons.swap_horiz_rounded),
-      };
+    TransactionType.purchase => Icons.shopping_bag_outlined,
+    TransactionType.rent => Icons.real_estate_agent_outlined,
+    TransactionType.salary => Icons.flag_rounded,
+    TransactionType.house => Icons.home_rounded,
+    TransactionType.card => Icons.style_rounded,
+    TransactionType.mortgage => Icons.account_balance_outlined,
+    TransactionType.tax => Icons.receipt_long_outlined,
+    TransactionType.freeParking => Icons.local_parking_rounded,
+    TransactionType.transfer => Icons.swap_horiz_rounded,
+    _ =>
+      incoming
+          ? Icons.south_west_rounded
+          : (outgoing ? Icons.north_east_rounded : Icons.swap_horiz_rounded),
+  };
 
   @override
   Widget build(BuildContext context) {
@@ -112,8 +114,11 @@ class TransactionTile extends StatelessWidget {
     final String amountText;
     if (incoming) {
       color = AppColors.income;
-      amountText =
-          formatSignedMoney(transaction.amount, currencySymbol, incoming: true);
+      amountText = formatSignedMoney(
+        transaction.amount,
+        currencySymbol,
+        incoming: true,
+      );
     } else if (outgoing) {
       color = AppColors.expense;
       amountText = formatSignedMoney(
@@ -123,7 +128,18 @@ class TransactionTile extends StatelessWidget {
       );
     } else {
       color = scheme.onSurfaceVariant;
-      amountText = formatMoney(transaction.amount, currencySymbol);
+      // Not my transaction, but still show a direction: money leaving the
+      // bank reads as a collection (+), everything else — including one
+      // player paying another — reads from the payer's side (-), matching
+      // how the title itself is worded ("$from paid…", "$from → $to").
+      // A $0 transfer has no direction to show.
+      amountText = transaction.amount == 0
+          ? formatMoney(0, currencySymbol)
+          : formatSignedMoney(
+              transaction.amount,
+              currencySymbol,
+              incoming: transaction.fromId == Player.bankId,
+            );
     }
 
     final subtitleParts = [
@@ -169,6 +185,8 @@ class TransactionTile extends StatelessWidget {
           if (balanceAfter != null)
             Text(
               'bal ${formatMoney(balanceAfter!, currencySymbol)}',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
               style: textTheme.labelSmall?.copyWith(
                 color: scheme.onSurfaceVariant,
               ),

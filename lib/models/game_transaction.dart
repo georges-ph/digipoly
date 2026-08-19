@@ -1,3 +1,5 @@
+import 'player.dart';
+
 /// What kind of money movement a transaction is, so the activity feed can
 /// say "Rent · Boardwalk" instead of relying on hand-typed notes.
 enum TransactionType {
@@ -68,6 +70,12 @@ class GameTransaction {
 
   final DateTime timestamp;
   final String note;
+
+  /// Whoever actually triggered this transaction — the payer, except a
+  /// bank collection has no controlling player on the paying side, so it
+  /// falls to the collector instead. Used to gate note edits to the one
+  /// player who wrote it, not just anyone it happened to involve.
+  String get makerId => fromId == Player.bankId ? toId : fromId;
 
   GameTransaction copyWith({String? note}) => GameTransaction(
         id: id,

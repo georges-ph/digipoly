@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import '../providers/game_provider.dart';
 import '../utils/pay_code.dart';
 import '../utils/snack.dart';
+import '../widgets/qr_scan_view.dart';
 import 'send_money_screen.dart';
 
 /// Whether this platform can scan QR codes (mobile_scanner has no Windows
@@ -63,6 +64,7 @@ class _ScanPayScreenState extends State<ScanPayScreen> {
           builder: (_) => SendMoneyScreen(
             initialRecipientId: code.playerId,
             initialAmount: code.amount,
+            fromScannedCode: true,
           ),
         ),
       );
@@ -72,30 +74,11 @@ class _ScanPayScreenState extends State<ScanPayScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final textTheme = Theme.of(context).textTheme;
-
     return Scaffold(
       appBar: AppBar(title: const Text('Scan to pay')),
-      body: Stack(
-        children: [
-          MobileScanner(onDetect: _onDetect),
-          Align(
-            alignment: Alignment.bottomCenter,
-            child: Container(
-              margin: const EdgeInsets.all(24),
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
-              decoration: BoxDecoration(
-                color: Colors.black.withValues(alpha: 0.55),
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: Text(
-                "Point at another player's payment code",
-                style: textTheme.bodyMedium?.copyWith(color: Colors.white),
-              ),
-            ),
-          ),
-        ],
+      body: QrScanView(
+        onDetect: _onDetect,
+        hintText: "Point at another player's payment code",
       ),
     );
   }

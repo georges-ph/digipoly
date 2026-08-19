@@ -42,6 +42,22 @@ typedef BankCollectionEvent = ({String playerId, int amount});
 
 typedef PaymentReceivedEvent = ({String fromId, int amount, bool isRent});
 
+typedef PropertyPurchaseEvent = ({
+  String playerId,
+  String propertyId,
+  int amount,
+});
+
+typedef AuctionStartEvent = ({String propertyId, String startedBy});
+
+typedef JailEvent = ({String playerId});
+
+/// Any other money-moving transaction type not already covered by a more
+/// specific event above (salary, houses, mortgage, tax, Free Parking) —
+/// carries the whole transaction since the right icon/copy depends on its
+/// type the same way `TransactionTile` already works it out.
+typedef OtherTransactionEvent = ({GameTransaction tx});
+
 /// The active game session on this device.
 ///
 /// Whether hosting or joining, the device always participates through a
@@ -53,9 +69,9 @@ class GameProvider extends ChangeNotifier {
     required DatabaseService database,
     required IdentityService identity,
     required DiscoveryService discovery,
-  })  : _db = database,
-        _identity = identity,
-        _discovery = discovery;
+  }) : _db = database,
+       _identity = identity,
+       _discovery = discovery;
 
   final DatabaseService _db;
   final IdentityService _identity;
@@ -98,9 +114,19 @@ class GameProvider extends ChangeNotifier {
   final _errors = StreamController<String>.broadcast();
   final _cardDraws = StreamController<CardDrawEvent>.broadcast();
   final _diceRolls = StreamController<DiceRoll>.broadcast();
-  final _propertyTransfers = StreamController<PropertyTransferEvent>.broadcast();
+  final _propertyTransfers =
+      StreamController<PropertyTransferEvent>.broadcast();
   final _bankCollections = StreamController<BankCollectionEvent>.broadcast();
+  final _bankPayments = StreamController<BankCollectionEvent>.broadcast();
   final _paymentsReceived = StreamController<PaymentReceivedEvent>.broadcast();
+  final _propertyPurchases =
+      StreamController<PropertyPurchaseEvent>.broadcast();
+  final _auctionStarts = StreamController<AuctionStartEvent>.broadcast();
+  final _playerJoins = StreamController<Player>.broadcast();
+  final _jailEntries = StreamController<JailEvent>.broadcast();
+  final _otherTransactions =
+      StreamController<OtherTransactionEvent>.broadcast();
+  final _rollDismissals = StreamController<String>.broadcast();
   String? _outgoingRequestId;
 
   // ------------------------------------------------------------- Getters
@@ -115,6 +141,12 @@ class GameProvider extends ChangeNotifier {
   /// pop up automatically wherever players are looking.
   Stream<DiceRoll> get diceRolls => _diceRolls.stream;
 
+  /// Fires with a player's id the moment *their own* device is about to
+  /// show its copy of a card it just drew — lets everyone else's reveal of
+  /// that same card wait for that instead of guessing how long it takes
+  /// someone to look at their own dice result first.
+  Stream<String> get rollDismissals => _rollDismissals.stream;
+
   /// Every property handed from one player to another — the recipient's
   /// device uses this to pop up a "you were given X" notice.
   Stream<PropertyTransferEvent> get propertyTransfers =>
@@ -125,10 +157,44 @@ class GameProvider extends ChangeNotifier {
   /// notice it happened instead of finding out later in the activity feed.
   Stream<BankCollectionEvent> get bankCollections => _bankCollections.stream;
 
+  /// The reverse: a free-form payment sent *to* the bank (paying it back,
+  /// covering something manually). Same reasoning as [bankCollections] —
+  /// otherwise it only shows up later in the activity feed.
+  Stream<BankCollectionEvent> get bankPayments => _bankPayments.stream;
+
   /// A direct payment or rent landing in my account (not a settled money
   /// request — that already has its own resolution UI, and not a card or
   /// transfer, which already pop their own dialog for everyone involved).
   Stream<PaymentReceivedEvent> get paymentsReceived => _paymentsReceived.stream;
+
+  /// Someone bought a property (not an auction win, not me) — the rest of
+  /// the table only otherwise learns this from the properties list/board
+  /// updating quietly, so it's worth flagging like a bank collection or an
+  /// incoming payment is.
+  Stream<PropertyPurchaseEvent> get propertyPurchases =>
+      _propertyPurchases.stream;
+
+  /// A live auction just opened — everyone already sees the running
+  /// `AuctionCard` once it exists, but nothing else calls out that it just
+  /// started, so anyone not already looking at that spot would miss it.
+  Stream<AuctionStartEvent> get auctionStarts => _auctionStarts.stream;
+
+  /// A new player took a seat — a genuinely new join, not a reconnect (the
+  /// server tells the two apart itself), so an already-known player coming
+  /// back online doesn't re-announce itself as if they just joined.
+  Stream<Player> get playerJoins => _playerJoins.stream;
+
+  /// Someone's token just landed them in jail (a Go To Jail square, or a
+  /// card that moves them onto one) — surfaced the same way any other
+  /// landing effect worth a heads-up is.
+  Stream<JailEvent> get jailEntries => _jailEntries.stream;
+
+  /// Salary, houses, mortgage, tax and Free Parking — every money-moving
+  /// transaction type that doesn't already have its own richer notice
+  /// above, for whoever the transaction actually happened to (never fired
+  /// for my own).
+  Stream<OtherTransactionEvent> get otherTransactions =>
+      _otherTransactions.stream;
 
   bool get hasActiveSession => _record != null && _client != null;
   GameRecord? get record => _record;
@@ -172,9 +238,8 @@ class GameProvider extends ChangeNotifier {
   }
 
   /// Valid payment recipients: everyone still in the game except me.
-  List<Player> get otherActivePlayers => players
-      .where((p) => p.id != myPlayerId && !p.hasLeft)
-      .toList();
+  List<Player> get otherActivePlayers =>
+      players.where((p) => p.id != myPlayerId && !p.hasLeft).toList();
 
   /// Newest first, for activity feeds.
   List<GameTransaction> get transactions => _transactions.reversed.toList();
@@ -182,8 +247,7 @@ class GameProvider extends ChangeNotifier {
   Map<String, PropertyOwnership> get ownerships =>
       Map.unmodifiable(_ownerships);
 
-  PropertyOwnership? ownershipOf(String propertyId) =>
-      _ownerships[propertyId];
+  PropertyOwnership? ownershipOf(String propertyId) => _ownerships[propertyId];
 
   /// Auctions currently running at the table, keyed by property id.
   Map<String, PropertyAuction> get auctions => Map.unmodifiable(_auctions);
@@ -237,8 +301,7 @@ class GameProvider extends ChangeNotifier {
   /// square you're on, paying its rent, sends, collects, drawing a card,
   /// GO salary — is allowed the whole turn: before the roll (last turn's
   /// landing, taxes) or after it (this roll's).
-  bool get canResolve =>
-      _connection == ClientStatus.connected && isMyTurn;
+  bool get canResolve => _connection == ClientStatus.connected && isMyTurn;
 
   /// Accumulated Free Parking pot (0 on boards without a curated layout).
   int get freeParkingPot => _freeParkingPot;
@@ -363,8 +426,9 @@ class GameProvider extends ChangeNotifier {
     _ownerships
       ..clear()
       ..addEntries(
-        (await _db.getOwnerships(record.game.id))
-            .map((o) => MapEntry(o.propertyId, o)),
+        (await _db.getOwnerships(
+          record.game.id,
+        )).map((o) => MapEntry(o.propertyId, o)),
       );
     final turnState = await _db.getTurnState(record.game.id);
     _currentTurnId = turnState.currentTurnId;
@@ -560,13 +624,12 @@ class GameProvider extends ChangeNotifier {
 
   /// Passing GO: the bank pays me the board's salary — doubled when the
   /// token lands exactly on GO (common house rule).
-  Future<Result<void>> collectSalary({bool landedOnGo = false}) =>
-      sendPayment(
-        fromId: Player.bankId,
-        toId: myPlayerId,
-        amount: (game?.board.salary ?? 0) * (landedOnGo ? 2 : 1),
-        note: landedOnGo ? 'Landed on GO' : 'Passed GO',
-      );
+  Future<Result<void>> collectSalary({bool landedOnGo = false}) => sendPayment(
+    fromId: Player.bankId,
+    toId: myPlayerId,
+    amount: (game?.board.salary ?? 0) * (landedOnGo ? 2 : 1),
+    note: landedOnGo ? 'Landed on GO' : 'Passed GO',
+  );
 
   /// Edits a past transaction's note. Only the note changes — amount and
   /// parties are fixed once a transaction is booked.
@@ -754,9 +817,11 @@ class GameProvider extends ChangeNotifier {
   /// broadcasts it to every device; resolves when it arrives.
   Future<Result<void>> rollDice() {
     if (!canRoll) {
-      return Future.value(err(
-        _turnRolled ? 'You already rolled this turn.' : "It's not your turn.",
-      ));
+      return Future.value(
+        err(
+          _turnRolled ? 'You already rolled this turn.' : "It's not your turn.",
+        ),
+      );
     }
     _client!.sendRollDice();
     final completer = Completer<Result<void>>();
@@ -769,6 +834,14 @@ class GameProvider extends ChangeNotifier {
       },
     );
   }
+
+  /// Tells the table it's fine to reveal a Chance/Community Chest card I
+  /// just drew — sent right as my own copy of that card's dialog is about
+  /// to show, whether that draw came from landing on a roll (by then queued
+  /// behind my own dice sheet already closing) or a manual quick action
+  /// (nothing to queue behind, so effectively immediate). Fire-and-forget,
+  /// like rollDice/drawCard: nothing is waiting on a reply.
+  void dismissRoll() => _client?.sendDismissRoll();
 
   /// Ends my turn; the server advances the rotation. Only allowed after
   /// rolling — a turn is roll, act, end.
@@ -806,8 +879,7 @@ class GameProvider extends ChangeNotifier {
       case MessageType.snapshot:
         _applySnapshot(message.payload);
       case MessageType.joinRejected:
-        final reason =
-            message.payload['reason'] as String? ?? 'Join rejected.';
+        final reason = message.payload['reason'] as String? ?? 'Join rejected.';
         _completeJoin(err(reason));
       case MessageType.paymentApplied:
         _applyPayment(message.payload);
@@ -904,9 +976,11 @@ class GameProvider extends ChangeNotifier {
         // same as a dice roll.
         final playersJson = message.payload['players'] as List<dynamic>?;
         if (playersJson != null) {
-          _players = playersJson
+          final updated = playersJson
               .map((e) => Player.fromJson(e as Map<String, dynamic>))
               .toList();
+          _emitNewJailEntries(_players, updated);
+          _players = updated;
           final record = _record;
           if (record != null && _persistLocally) {
             _db.upsertPlayers(record.game.id, _players);
@@ -931,9 +1005,11 @@ class GameProvider extends ChangeNotifier {
               message.payload['freeParkingPot'] as int? ?? _freeParkingPot;
           final playersJson = message.payload['players'] as List<dynamic>?;
           if (playersJson != null) {
-            _players = playersJson
+            final updated = playersJson
                 .map((e) => Player.fromJson(e as Map<String, dynamic>))
                 .toList();
+            _emitNewJailEntries(_players, updated);
+            _players = updated;
           }
           final record = _record;
           if (record != null && _persistLocally) {
@@ -968,6 +1044,12 @@ class GameProvider extends ChangeNotifier {
         }
         notifyListeners();
       case MessageType.playerJoined:
+        final json = message.payload['player'] as Map<String, dynamic>?;
+        if (json != null) {
+          final player = Player.fromJson(json);
+          _upsertPlayer(player);
+          if (player.id != myPlayerId) _playerJoins.add(player);
+        }
       case MessageType.presenceChanged:
         final json = message.payload['player'] as Map<String, dynamic>?;
         if (json != null) _upsertPlayer(Player.fromJson(json));
@@ -981,6 +1063,16 @@ class GameProvider extends ChangeNotifier {
         _hostEnded = true;
         notifyListeners();
       case MessageType.auctionStarted:
+        final json = message.payload['auction'] as Map<String, dynamic>?;
+        if (json != null) {
+          final auction = PropertyAuction.fromJson(json);
+          _auctions[auction.propertyId] = auction;
+          _auctionStarts.add((
+            propertyId: auction.propertyId,
+            startedBy: auction.startedBy,
+          ));
+          notifyListeners();
+        }
       case MessageType.auctionBid:
         final json = message.payload['auction'] as Map<String, dynamic>?;
         if (json != null) {
@@ -1000,12 +1092,15 @@ class GameProvider extends ChangeNotifier {
         final reason =
             message.payload['reason'] as String? ?? 'That bid was rejected.';
         _errors.add(reason);
+      case MessageType.rollDismissed:
+        final playerId = message.payload['playerId'] as String?;
+        if (playerId != null) _rollDismissals.add(playerId);
       default:
         break;
     }
   }
 
-  void _applySnapshot(Map<String, dynamic> payload) {
+  Future<void> _applySnapshot(Map<String, dynamic> payload) async {
     final json = payload['snapshot'] as Map<String, dynamic>?;
     if (json == null) return;
     final snapshot = GameSnapshot.fromJson(json);
@@ -1050,9 +1145,9 @@ class GameProvider extends ChangeNotifier {
 
     if (isHost) {
       // The server already persisted players and transactions.
-      _db.upsertGameRecord(_record!);
+      await _db.upsertGameRecord(_record!);
     } else if (!_spectating) {
-      _db.saveSnapshot(_record!, snapshot);
+      await _db.saveSnapshot(_record!, snapshot);
     }
 
     _completeJoin(ok(null));
@@ -1073,8 +1168,7 @@ class GameProvider extends ChangeNotifier {
           .map((e) => Player.fromJson(e as Map<String, dynamic>))
           .toList();
     }
-    _freeParkingPot =
-        payload['freeParkingPot'] as int? ?? _freeParkingPot;
+    _freeParkingPot = payload['freeParkingPot'] as int? ?? _freeParkingPot;
     if (!_transactions.any((t) => t.id == tx.id)) {
       _transactions.add(tx);
       // A free-form bank payout (not salary/card/Free Parking, which have
@@ -1083,6 +1177,9 @@ class GameProvider extends ChangeNotifier {
       // everyone else rather than only showing up in the activity feed.
       if (tx.type == TransactionType.payment && tx.fromId == Player.bankId) {
         _bankCollections.add((playerId: tx.toId, amount: tx.amount));
+      } else if (tx.type == TransactionType.payment &&
+          tx.toId == Player.bankId) {
+        _bankPayments.add((playerId: tx.fromId, amount: tx.amount));
       } else if (tx.toId == myPlayerId &&
           tx.fromId != Player.bankId &&
           (tx.type == TransactionType.payment ||
@@ -1097,6 +1194,33 @@ class GameProvider extends ChangeNotifier {
           amount: tx.amount,
           isRent: tx.type == TransactionType.rent,
         ));
+      } else if (tx.type == TransactionType.purchase &&
+          tx.fromId != myPlayerId &&
+          tx.propertyId != null) {
+        // Someone else bought a property (a plain buy or an auction win) —
+        // nothing else tells the rest of the table this happened.
+        _propertyPurchases.add((
+          playerId: tx.fromId,
+          propertyId: tx.propertyId!,
+          amount: tx.amount,
+        ));
+      } else if (tx.type == TransactionType.salary ||
+          tx.type == TransactionType.tax) {
+        // Auto-resolved by landing on a square mid-roll (or a "go to X"
+        // card) — unlike a manual action, the player it happened to gets
+        // no confirming dialog of their own, so they need this banner too,
+        // not just everyone else at the table.
+        _otherTransactions.add((tx: tx));
+      } else if (const {
+        TransactionType.house,
+        TransactionType.mortgage,
+        TransactionType.freeParking,
+      }.contains(tx.type)) {
+        // Whichever side isn't the bank is who this actually happened to —
+        // skip when that's me, since I already got direct feedback from
+        // whatever I just did (each of these is a manual, confirmed action).
+        final primary = tx.fromId != Player.bankId ? tx.fromId : tx.toId;
+        if (primary != myPlayerId) _otherTransactions.add((tx: tx));
       }
     }
 
@@ -1130,6 +1254,20 @@ class GameProvider extends ChangeNotifier {
       _db.upsertPlayers(record.game.id, [player]);
     }
     notifyListeners();
+  }
+
+  /// Flags whoever's [Player.inJail] flipped from false to true between an
+  /// old and updated player list — a dice roll or a "go to X" card are the
+  /// only ways to actually land on the Go To Jail square, and neither gets
+  /// a dedicated message type of its own for it, so it's detected here off
+  /// the full player list both already carry.
+  void _emitNewJailEntries(List<Player> before, List<Player> after) {
+    final wasInJail = {for (final p in before) p.id: p.inJail};
+    for (final p in after) {
+      if (p.inJail && wasInJail[p.id] != true) {
+        _jailEntries.add((playerId: p.id));
+      }
+    }
   }
 
   void _onStatus(ClientStatus status) {
@@ -1181,7 +1319,14 @@ class GameProvider extends ChangeNotifier {
     _diceRolls.close();
     _propertyTransfers.close();
     _bankCollections.close();
+    _bankPayments.close();
     _paymentsReceived.close();
+    _propertyPurchases.close();
+    _auctionStarts.close();
+    _playerJoins.close();
+    _jailEntries.close();
+    _otherTransactions.close();
+    _rollDismissals.close();
     super.dispose();
   }
 }

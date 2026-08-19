@@ -18,32 +18,38 @@ class TransactionDetailsSheet extends StatelessWidget {
     required this.transaction,
     required this.session,
     this.balanceAfter,
+    this.balanceAfterOwnerId,
   });
 
   final GameTransaction transaction;
   final GameProvider session;
   final int? balanceAfter;
+  final String? balanceAfterOwnerId;
 
   /// Notes only make sense on free-form money moves — a rent/purchase/
   /// mortgage/tax/etc. transaction's "note" is really just its label, not
   /// something either party wrote, so editing it there would be confusing.
+  /// Even on an editable type, only whoever actually made the transaction
+  /// (`GameTransaction.makerId`) may edit its note — not just any party to
+  /// it (e.g. the other side of a payment didn't write the note).
   bool get _noteIsEditable =>
-      transaction.type == TransactionType.payment ||
-      transaction.type == TransactionType.request;
+      (transaction.type == TransactionType.payment ||
+          transaction.type == TransactionType.request) &&
+      transaction.makerId == session.myPlayerId;
 
   String get _typeLabel => switch (transaction.type) {
-        TransactionType.payment => 'Payment',
-        TransactionType.rent => 'Rent',
-        TransactionType.purchase => 'Property purchase',
-        TransactionType.salary => 'Salary (passed GO)',
-        TransactionType.house => 'Buildings',
-        TransactionType.request => 'Requested payment',
-        TransactionType.card => 'Card',
-        TransactionType.mortgage => 'Mortgage',
-        TransactionType.tax => 'Tax',
-        TransactionType.freeParking => 'Free Parking',
-        TransactionType.transfer => 'Property transfer',
-      };
+    TransactionType.payment => 'Payment',
+    TransactionType.rent => 'Rent',
+    TransactionType.purchase => 'Property purchase',
+    TransactionType.salary => 'Salary (passed GO)',
+    TransactionType.house => 'Buildings',
+    TransactionType.request => 'Requested payment',
+    TransactionType.card => 'Card',
+    TransactionType.mortgage => 'Mortgage',
+    TransactionType.tax => 'Tax',
+    TransactionType.freeParking => 'Free Parking',
+    TransactionType.transfer => 'Property transfer',
+  };
 
   Future<void> _editNote(BuildContext context) async {
     final controller = TextEditingController(text: transaction.note);
@@ -62,11 +68,13 @@ class TransactionDetailsSheet extends StatelessWidget {
           ),
         ),
         actions: [
-          TextButton(
+          OutlinedButton(
+            style: OutlinedButton.styleFrom(minimumSize: const Size(0, 44)),
             onPressed: () => Navigator.pop(dialogContext),
             child: const Text('Cancel'),
           ),
           FilledButton(
+            style: FilledButton.styleFrom(minimumSize: const Size(0, 44)),
             onPressed: () =>
                 Navigator.pop(dialogContext, controller.text.trim()),
             child: const Text('Save'),
@@ -97,13 +105,29 @@ class TransactionDetailsSheet extends StatelessWidget {
         ? AppColors.income
         : (outgoing ? AppColors.expense : scheme.onSurface);
 
+    // Not my transaction, but still show a direction: money leaving the
+    // bank reads as a collection (+), everything else — including one
+    // player paying another — reads from the payer's side (−), matching
+    // the tile's convention. A $0 transfer has no direction.
+    final String sign;
+    if (incoming) {
+      sign = '+';
+    } else if (outgoing) {
+      sign = '−';
+    } else if (transaction.amount == 0) {
+      sign = '';
+    } else {
+      sign = transaction.fromId == Player.bankId ? '+' : '−';
+    }
+
     final propertyName = transaction.propertyId == null
         ? null
         : session.propertyNameOf(transaction.propertyId!);
 
     Widget partyRow(String label, String accountId) {
-      final player =
-          accountId == Player.bankId ? null : session.playerById(accountId);
+      final player = accountId == Player.bankId
+          ? null
+          : session.playerById(accountId);
       return Padding(
         padding: const EdgeInsets.symmetric(vertical: 6),
         child: Row(
@@ -112,8 +136,9 @@ class TransactionDetailsSheet extends StatelessWidget {
               width: 52,
               child: Text(
                 label,
-                style: textTheme.bodySmall
-                    ?.copyWith(color: scheme.onSurfaceVariant),
+                style: textTheme.bodySmall?.copyWith(
+                  color: scheme.onSurfaceVariant,
+                ),
               ),
             ),
             if (player != null)
@@ -138,8 +163,9 @@ class TransactionDetailsSheet extends StatelessWidget {
                 accountId == session.myPlayerId
                     ? 'You'
                     : session.accountName(accountId),
-                style: textTheme.bodyLarge
-                    ?.copyWith(fontWeight: FontWeight.w700),
+                style: textTheme.bodyLarge?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
               ),
             ),
           ],
@@ -148,28 +174,30 @@ class TransactionDetailsSheet extends StatelessWidget {
     }
 
     Widget factRow(String label, String value) => Padding(
-          padding: const EdgeInsets.symmetric(vertical: 6),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              SizedBox(
-                width: 90,
-                child: Text(
-                  label,
-                  style: textTheme.bodySmall
-                      ?.copyWith(color: scheme.onSurfaceVariant),
-                ),
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 90,
+            child: Text(
+              label,
+              style: textTheme.bodySmall?.copyWith(
+                color: scheme.onSurfaceVariant,
               ),
-              Expanded(
-                child: Text(
-                  value,
-                  style: textTheme.bodyMedium
-                      ?.copyWith(fontWeight: FontWeight.w600),
-                ),
-              ),
-            ],
+            ),
           ),
-        );
+          Expanded(
+            child: Text(
+              value,
+              style: textTheme.bodyMedium?.copyWith(
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
 
     return SafeArea(
       child: SingleChildScrollView(
@@ -189,8 +217,7 @@ class TransactionDetailsSheet extends StatelessWidget {
             ),
             const SizedBox(height: 6),
             Text(
-              (incoming ? '+' : (outgoing ? '−' : '')) +
-                  formatMoney(transaction.amount, currency),
+              sign + formatMoney(transaction.amount, currency),
               textAlign: TextAlign.center,
               style: textTheme.displaySmall?.copyWith(
                 fontWeight: FontWeight.w800,
@@ -227,8 +254,9 @@ class TransactionDetailsSheet extends StatelessWidget {
                     width: 90,
                     child: Text(
                       'Note',
-                      style: textTheme.bodySmall
-                          ?.copyWith(color: scheme.onSurfaceVariant),
+                      style: textTheme.bodySmall?.copyWith(
+                        color: scheme.onSurfaceVariant,
+                      ),
                     ),
                   ),
                   Expanded(
@@ -260,12 +288,17 @@ class TransactionDetailsSheet extends StatelessWidget {
             ),
             factRow(
               'When',
-              DateFormat('EEEE d MMM y · HH:mm:ss')
-                  .format(transaction.timestamp),
+              DateFormat(
+                'EEEE d MMM y · HH:mm:ss',
+              ).format(transaction.timestamp),
             ),
             if (balanceAfter != null)
               factRow(
-                'Balance after',
+                balanceAfterOwnerId == null ||
+                        balanceAfterOwnerId == session.myPlayerId
+                    ? 'Balance after'
+                    : "${session.accountName(balanceAfterOwnerId!)}'s "
+                          'balance after',
                 formatMoney(balanceAfter!, currency),
               ),
             factRow('Reference', transaction.id.split('-').first),

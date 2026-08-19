@@ -10,6 +10,7 @@ import 'dart:math';
 
 import '../models/board.dart';
 import '../models/dice_roll.dart';
+import '../models/game_transaction.dart';
 import '../models/player.dart';
 import '../models/result.dart';
 import '../providers/boards_provider.dart';
@@ -19,7 +20,7 @@ import '../services/nfc_service.dart';
 import '../theme/app_theme.dart';
 import '../utils/formatting.dart';
 import '../utils/snack.dart';
-import '../utils/top_banner.dart';
+import '../widgets/activity_banner.dart';
 import '../widgets/activity_feed.dart';
 import '../widgets/auction_card.dart';
 import '../widgets/balance_card.dart';
@@ -52,7 +53,13 @@ class _GameScreenState extends State<GameScreen> {
   StreamSubscription<DiceRoll>? _diceRollSub;
   StreamSubscription<PropertyTransferEvent>? _transferSub;
   StreamSubscription<BankCollectionEvent>? _bankCollectionSub;
+  StreamSubscription<BankCollectionEvent>? _bankPaymentSub;
   StreamSubscription<PaymentReceivedEvent>? _paymentReceivedSub;
+  StreamSubscription<PropertyPurchaseEvent>? _purchaseSub;
+  StreamSubscription<AuctionStartEvent>? _auctionStartSub;
+  StreamSubscription<Player>? _playerJoinSub;
+  StreamSubscription<JailEvent>? _jailEntrySub;
+  StreamSubscription<OtherTransactionEvent>? _otherTxSub;
   final _nfc = NfcService.instance;
   bool _nfcAvailable = false;
   GameProvider? _session;
@@ -74,11 +81,23 @@ class _GameScreenState extends State<GameScreen> {
   // square once its dialog closes — set so the roll's own listener doesn't
   // also trigger a second, redundant property auto-open for the same square.
   bool _cardHandledThisRoll = false;
+  // Counts queued-but-not-yet-finished steps of _rollUiChain (dice sheet
+  // dismissal, board reveal, the auto-opened property sheet). The server
+  // un-rolls the turn the instant a double lands, well before this local
+  // reveal sequence finishes — without this, "Roll dice" re-enables that
+  // same instant and a fast tap can fire the bonus roll before the player
+  // ever sees the property sheet for the throw that just landed.
+  int _pendingRollUi = 0;
 
   void _enqueueRollUi(FutureOr<void> Function() action) {
-    _rollUiChain = _rollUiChain.then((_) {
-      if (!mounted) return null;
-      return action();
+    if (mounted) setState(() => _pendingRollUi++);
+    _rollUiChain = _rollUiChain.then((_) async {
+      if (!mounted) return;
+      try {
+        await action();
+      } finally {
+        if (mounted) setState(() => _pendingRollUi--);
+      }
     });
   }
 
@@ -98,9 +117,33 @@ class _GameScreenState extends State<GameScreen> {
       // A "go to X"/"go back N" card moves the drawer — everything else
       // (money, a jail card, repairs) leaves position untouched, so there's
       // no landing to re-check once the dialog closes.
-      final moved = event.card.moveToPropertyId != null ||
+      final moved =
+          event.card.moveToPropertyId != null ||
           (event.card.moveBySpaces ?? 0) != 0;
       _enqueueRollUi(() async {
+        // The server resolves a landing (drawing its card) before it even
+        // broadcasts the roll itself, so this reaches every other device
+        // before the drawer has necessarily seen their own dice result —
+        // there's no dice sheet to wait on here since it's never their own
+        // roll. Waiting for the drawer's own dismissRoll signal (see
+        // GameProvider.rollDismissals, sent right below) means everyone
+        // else reveals the instant the drawer actually has, not a guessed
+        // delay — with a generous timeout as a fallback in case that signal
+        // never arrives (the drawer's app crashed, got backgrounded, lost
+        // connection). This works the same whether the draw came from a
+        // dice roll (this action is already queued behind that device's own
+        // dice-sheet dismissal via _rollUiChain, so by the time it fires
+        // here the sheet is already gone) or a manual Chance/Chest quick
+        // action (nothing queued ahead of it, so it fires right away) — both
+        // cases boil down to "the drawer's own dialog is about to show".
+        if (isMine) {
+          _session?.dismissRoll();
+        } else {
+          await _session?.rollDismissals
+              .firstWhere((id) => id == event.playerId)
+              .timeout(const Duration(seconds: 10), onTimeout: () => '');
+        }
+        if (!mounted) return;
         await _showCardDialog(event);
         if (mounted && isMine && moved) await _afterRollReveal();
         _cardHandledThisRoll = false;
@@ -113,10 +156,36 @@ class _GameScreenState extends State<GameScreen> {
     // whoever's looking at it closes it themselves; no timer, no auto-close.
     _diceRollSub = session.diceRolls.listen((roll) {
       if (!mounted) return;
-      final isMine = roll.playerId == _session?.myPlayerId;
-      final hasLayout = (_session?.game?.board.goIndex ?? -1) >= 0;
-      if (hasLayout && !isMine && !_boardSheetOpen) {
-        _openBoardSheet();
+      final session = _session;
+      final isMine = roll.playerId == session?.myPlayerId;
+      final hasLayout = (session?.game?.board.goIndex ?? -1) >= 0;
+      // A landing that draws a Chance/Chest card broadcasts the card
+      // *before* the roll itself (the server resolves the landing inside
+      // the same call that produces the roll broadcast), so the card
+      // listener above already enqueued that dialog onto _rollUiChain by
+      // the time this fires. Enqueuing the board open the same way — rather
+      // than firing it immediately — keeps it from stacking on top of and
+      // hiding that still-open card dialog; it simply takes its turn after.
+      if (hasLayout && !isMine) {
+        _enqueueRollUi(() {
+          if (!_boardSheetOpen) return _openBoardSheet();
+        });
+      }
+      // Only the roller sees the dice sheet (opened from the "Roll dice"
+      // button) — everyone else needs their own heads-up that a roll just
+      // happened and what it was, especially on boards with no curated
+      // layout where the board popup above never fires at all.
+      if (!isMine && session != null) {
+        showActivityBanner(
+          context,
+          ActivityBannerData(
+            icon: Icons.casino_rounded,
+            tone: BannerTone.neutral,
+            title: '${session.accountName(roll.playerId)} rolled the dice',
+            meta: roll.isDouble ? 'Double!' : null,
+            amountText: '🎲 ${roll.total}',
+          ),
+        );
       }
       // Only my own roll moves my own token — offer to buy/pay rent/build
       // right away instead of making the player dig through Properties.
@@ -130,12 +199,30 @@ class _GameScreenState extends State<GameScreen> {
         }
       }
     });
-    // Someone handed me a property directly (not a landing/buy) — worth a
-    // heads-up wherever I'm looking, same as an incoming money request.
+    // Someone handed a property directly to another player (not a
+    // landing/buy). The recipient gets a full dialog, same as an incoming
+    // money request; everyone else at the table (neither side of the
+    // trade) just gets a banner, same as any other transaction that isn't
+    // theirs.
     _transferSub = session.propertyTransfers.listen((event) {
-      if (!mounted || event.toId != _session?.myPlayerId) return;
+      if (!mounted) return;
       final session = _session;
       if (session == null) return;
+      if (event.toId != session.myPlayerId &&
+          event.fromId != session.myPlayerId) {
+        showActivityBanner(
+          context,
+          ActivityBannerData(
+            icon: Icons.swap_horiz_rounded,
+            tone: BannerTone.neutral,
+            title:
+                '${session.accountName(event.fromId)} transferred '
+                '${session.propertyNameOf(event.propertyId)} to '
+                '${session.accountName(event.toId)}',
+          ),
+        );
+      }
+      if (event.toId != session.myPlayerId) return;
       final property = session.propertyById(event.propertyId);
       showDialog<void>(
         context: context,
@@ -162,11 +249,34 @@ class _GameScreenState extends State<GameScreen> {
       if (session == null) return;
       final board = session.game?.board;
       if (board == null) return;
-      showTopBanner(
+      showActivityBanner(
         context,
-        '${session.accountName(event.playerId)} collected '
-        '${formatMoney(event.amount, board.currencySymbol)} from the bank',
-        icon: Icons.account_balance_rounded,
+        ActivityBannerData(
+          icon: Icons.account_balance_rounded,
+          tone: BannerTone.neutral,
+          title:
+              '${session.accountName(event.playerId)} collected from '
+              'the bank',
+          amountText: formatMoney(event.amount, board.currencySymbol),
+        ),
+      );
+    });
+    // The reverse: paying the bank back — just as invisible to everyone
+    // else otherwise, since it doesn't land in anyone's account.
+    _bankPaymentSub = session.bankPayments.listen((event) {
+      if (!mounted || event.playerId == _session?.myPlayerId) return;
+      final session = _session;
+      if (session == null) return;
+      final board = session.game?.board;
+      if (board == null) return;
+      showActivityBanner(
+        context,
+        ActivityBannerData(
+          icon: Icons.account_balance_rounded,
+          tone: BannerTone.neutral,
+          title: '${session.accountName(event.playerId)} paid the bank',
+          amountText: formatMoney(event.amount, board.currencySymbol),
+        ),
       );
     });
     // A direct payment landing in my account — worth a heads-up wherever
@@ -176,13 +286,144 @@ class _GameScreenState extends State<GameScreen> {
       final session = _session;
       final board = session?.game?.board;
       if (session == null || board == null) return;
-      final amount = formatMoney(event.amount, board.currencySymbol);
-      showTopBanner(
+      showActivityBanner(
         context,
-        event.isRent
-            ? '${session.accountName(event.fromId)} paid you $amount rent'
-            : '${session.accountName(event.fromId)} sent you $amount',
-        icon: Icons.arrow_downward_rounded,
+        ActivityBannerData(
+          icon: event.isRent
+              ? Icons.real_estate_agent_outlined
+              : Icons.arrow_downward_rounded,
+          tone: BannerTone.income,
+          title: event.isRent
+              ? '${session.accountName(event.fromId)} paid you rent'
+              : '${session.accountName(event.fromId)} sent you money',
+          amountText: formatSignedMoney(
+            event.amount,
+            board.currencySymbol,
+            incoming: true,
+          ),
+        ),
+      );
+    });
+    // Someone else bought a property — the properties list/board update
+    // quietly on their own, so flag it the same way a bank collection is.
+    _purchaseSub = session.propertyPurchases.listen((event) {
+      if (!mounted) return;
+      final session = _session;
+      final board = session?.game?.board;
+      if (session == null || board == null) return;
+      showActivityBanner(
+        context,
+        ActivityBannerData(
+          icon: Icons.home_work_rounded,
+          tone: BannerTone.neutral,
+          title:
+              '${session.accountName(event.playerId)} bought '
+              '${session.propertyNameOf(event.propertyId)}',
+          amountText: formatMoney(event.amount, board.currencySymbol),
+        ),
+      );
+    });
+    // A live auction just opened — everyone sees the running AuctionCard,
+    // but nothing else calls out that it started for whoever isn't already
+    // looking at that spot on screen.
+    _auctionStartSub = session.auctionStarts.listen((event) {
+      if (!mounted) return;
+      final session = _session;
+      if (session == null) return;
+      if (event.startedBy == session.myPlayerId) return;
+      showActivityBanner(
+        context,
+        ActivityBannerData(
+          icon: Icons.gavel_rounded,
+          tone: BannerTone.neutral,
+          title:
+              '${session.accountName(event.startedBy)} started an '
+              'auction for ${session.propertyNameOf(event.propertyId)}',
+        ),
+      );
+    });
+    // A new player took a seat — a reconnect of someone already known
+    // doesn't fire this (see GameProvider.playerJoins).
+    _playerJoinSub = session.playerJoins.listen((player) {
+      if (!mounted) return;
+      showActivityBanner(
+        context,
+        ActivityBannerData(
+          icon: Icons.person_add_alt_1_rounded,
+          tone: BannerTone.neutral,
+          title: '${player.name} joined the table',
+        ),
+      );
+    });
+    // Landing in jail only ever happens to the roller themselves — this is
+    // purely a heads-up for everyone else, who'd otherwise only notice from
+    // the board or the activity feed.
+    _jailEntrySub = session.jailEntries.listen((event) {
+      if (!mounted) return;
+      final session = _session;
+      if (session == null || event.playerId == session.myPlayerId) return;
+      showActivityBanner(
+        context,
+        ActivityBannerData(
+          icon: Icons.lock_outline_rounded,
+          tone: BannerTone.expense,
+          title: '${session.accountName(event.playerId)} went to jail',
+        ),
+      );
+    });
+    // Everything else that moves money and isn't already covered by a more
+    // specific notice above (salary, houses, mortgage, tax, Free Parking).
+    _otherTxSub = session.otherTransactions.listen((event) {
+      if (!mounted) return;
+      final session = _session;
+      final board = session?.game?.board;
+      if (session == null || board == null) return;
+      final tx = event.tx;
+      final currency = board.currencySymbol;
+      final amountText = formatMoney(tx.amount, currency);
+      // Salary and tax can now fire for my own roll too (see
+      // GameProvider._applyPayment) — "You" reads better than my own name.
+      String who(String id) =>
+          id == session.myPlayerId ? 'You' : session.accountName(id);
+      final (icon, title) = switch (tx.type) {
+        TransactionType.salary => (
+          Icons.flag_rounded,
+          '${who(tx.toId)} passed GO',
+        ),
+        TransactionType.house => (
+          Icons.home_rounded,
+          tx.fromId == Player.bankId
+              ? '${session.accountName(tx.toId)} sold houses · '
+                    '${session.propertyNameOf(tx.propertyId ?? '')}'
+              : '${session.accountName(tx.fromId)} built on '
+                    '${session.propertyNameOf(tx.propertyId ?? '')}',
+        ),
+        TransactionType.mortgage => (
+          Icons.account_balance_outlined,
+          tx.fromId == Player.bankId
+              ? '${session.accountName(tx.toId)} mortgaged '
+                    '${session.propertyNameOf(tx.propertyId ?? '')}'
+              : '${session.accountName(tx.fromId)} lifted the mortgage '
+                    'on ${session.propertyNameOf(tx.propertyId ?? '')}',
+        ),
+        TransactionType.tax => (
+          Icons.receipt_long_outlined,
+          '${who(tx.fromId)} paid tax',
+        ),
+        TransactionType.freeParking => (
+          Icons.local_parking_rounded,
+          '${session.accountName(tx.toId)} collected Free Parking',
+        ),
+        _ => (Icons.swap_horiz_rounded, 'A transaction happened'),
+      };
+      showActivityBanner(
+        context,
+        ActivityBannerData(
+          icon: icon,
+          tone: BannerTone.neutral,
+          title: title,
+          amountText: amountText,
+        ),
       );
     });
     // Money requests pop as a dialog wherever the player currently is.
@@ -207,23 +448,31 @@ class _GameScreenState extends State<GameScreen> {
     _diceRollSub?.cancel();
     _transferSub?.cancel();
     _bankCollectionSub?.cancel();
+    _bankPaymentSub?.cancel();
     _paymentReceivedSub?.cancel();
+    _purchaseSub?.cancel();
+    _auctionStartSub?.cancel();
+    _playerJoinSub?.cancel();
+    _jailEntrySub?.cancel();
+    _otherTxSub?.cancel();
     _session?.removeListener(_maybeShowRequestDialog);
     _nfc.stopWatch();
     super.dispose();
   }
 
   /// After my own roll (or a card that moved me) has been revealed: show
-  /// the board so the move is actually seen. Doesn't chain into
-  /// auto-opening the landed property sheet once the board closes — closing
-  /// one sheet to have another pop up unannounced reads as a trap, not a
-  /// convenience. The board itself highlights the token that just moved;
-  /// tapping that square opens its sheet, same as any other square.
+  /// the board — so the move is actually seen — then, a couple of seconds
+  /// after it pops up (not after it's closed — the board stays open behind
+  /// it), open the landed property's sheet on top of it. The delay is what
+  /// keeps this from reading as a trap the way an instant chain did in an
+  /// earlier version: the player gets a moment to actually look at where
+  /// their token landed on the board before the sheet appears.
   Future<void> _afterRollReveal() async {
     if (!mounted) return;
-    if ((_session?.game?.board.goIndex ?? -1) >= 0) {
-      await _openBoardSheet();
-    }
+    if ((_session?.game?.board.goIndex ?? -1) < 0) return;
+    _openBoardSheet();
+    await Future<void>.delayed(const Duration(seconds: 3));
+    if (mounted) _maybeOpenLandedProperty();
   }
 
   /// The app-bar toggle and the sheet's own close button: an explicit,
@@ -238,8 +487,9 @@ class _GameScreenState extends State<GameScreen> {
   }
 
   /// Shows the board as a modal sheet — blocks the rest of the screen like
-  /// any other sheet, dismissible only via its own close button — and stays
-  /// open until that happens; no timer, no auto-close. The returned future
+  /// any other sheet, dismissible by its own close button, a drag, or
+  /// tapping outside — and stays open until that happens on any device that
+  /// isn't dismissing it; no timer, no auto-close. The returned future
   /// completes once it's actually been closed, so callers can wait for the
   /// player to be done looking at it before showing anything else.
   Future<void> _openBoardSheet() {
@@ -247,8 +497,6 @@ class _GameScreenState extends State<GameScreen> {
     setState(() => _boardSheetOpen = true);
     final closed = showModalBottomSheet<void>(
       context: context,
-      isDismissible: false,
-      enableDrag: false,
       isScrollControlled: true,
       builder: (sheetContext) {
         _boardSheetContext = sheetContext;
@@ -262,6 +510,29 @@ class _GameScreenState extends State<GameScreen> {
       _boardSheetContext = null;
       if (mounted) setState(() => _boardSheetOpen = false);
     });
+  }
+
+  /// After my own token moves (a roll, or a "go to X" card), pop the
+  /// property sheet straight open if I landed on an ownable square — buy,
+  /// pay rent or manage buildings without digging through Properties.
+  void _maybeOpenLandedProperty() {
+    if (!mounted) return;
+    final session = _session;
+    final board = session?.game?.board;
+    final position = session?.me?.position;
+    if (session == null || board == null || board.goIndex < 0) return;
+    if (position == null ||
+        position < 0 ||
+        position >= board.properties.length) {
+      return;
+    }
+    final square = board.properties[position];
+    if (!square.kind.isOwnable) return;
+    showPropertySheet(
+      context,
+      propertyId: square.id,
+      nfcAvailable: _nfcAvailable,
+    );
   }
 
   void _maybeShowRequestDialog() {
@@ -283,8 +554,7 @@ class _GameScreenState extends State<GameScreen> {
     final who = event.playerId == session.myPlayerId
         ? 'You'
         : session.accountName(event.playerId);
-    final deckName =
-        event.deck == 'chest' ? 'Community Chest' : 'Chance';
+    final deckName = event.deck == 'chest' ? 'Community Chest' : 'Chance';
 
     return showDialog<void>(
       context: context,
@@ -301,8 +571,9 @@ class _GameScreenState extends State<GameScreen> {
               Text(
                 event.card.text,
                 textAlign: TextAlign.center,
-                style: textTheme.titleMedium
-                    ?.copyWith(fontWeight: FontWeight.w700),
+                style: textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
               ),
               if (amount != 0 && board != null) ...[
                 const SizedBox(height: 12),
@@ -312,8 +583,7 @@ class _GameScreenState extends State<GameScreen> {
                       : '−${formatMoney(amount.abs(), board.currencySymbol)}',
                   style: textTheme.headlineSmall?.copyWith(
                     fontWeight: FontWeight.w800,
-                    color:
-                        amount > 0 ? AppColors.income : AppColors.expense,
+                    color: amount > 0 ? AppColors.income : AppColors.expense,
                   ),
                 ),
               ],
@@ -395,7 +665,11 @@ class _GameScreenState extends State<GameScreen> {
         } else if (session.propertyById(propertyId) == null) {
           _snack('Property not found on this board.');
         } else {
-          showPropertySheet(context, propertyId: propertyId, nfcAvailable: _nfcAvailable);
+          showPropertySheet(
+            context,
+            propertyId: propertyId,
+            nfcAvailable: _nfcAvailable,
+          );
         }
       case NfcPlayerCard(:final playerId):
         final player = session.playerById(playerId);
@@ -574,8 +848,9 @@ class _GameScreenState extends State<GameScreen> {
     final session = context.read<GameProvider>();
     final board = session.game?.board;
     if (board == null) return;
-    final cards =
-        deck == 'chest' ? board.communityChestCards : board.chanceCards;
+    final cards = deck == 'chest'
+        ? board.communityChestCards
+        : board.chanceCards;
     if (cards.isEmpty) {
       _snack(
         'This board has no ${deck == 'chest' ? 'Community Chest' : 'Chance'} '
@@ -624,8 +899,9 @@ class _GameScreenState extends State<GameScreen> {
               children: [
                 Text(
                   'Room info',
-                  style: textTheme.titleLarge
-                      ?.copyWith(fontWeight: FontWeight.w800),
+                  style: textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.w800,
+                  ),
                 ),
                 const SizedBox(height: 16),
                 if (joinUrl != null) ...[
@@ -655,12 +931,19 @@ class _GameScreenState extends State<GameScreen> {
                           Clipboard.setData(ClipboardData(text: joinUrl));
                           // A regular snackbar anchors to the Scaffold below
                           // this sheet and ends up hidden behind it — the
-                          // overlay-based top banner stays visible instead.
-                          showTopBanner(
+                          // overlay-based activity banner stays visible
+                          // instead, and shares the same stacking host as
+                          // every other in-game notice (a dice roll, rent
+                          // landing) so it doesn't sit at the same top:0
+                          // spot as one of those and get silently covered.
+                          showActivityBanner(
                             sheetContext,
-                            'Join link copied — send it to the other '
-                            'players',
-                            icon: Icons.copy_rounded,
+                            const ActivityBannerData(
+                              icon: Icons.copy_rounded,
+                              tone: BannerTone.neutral,
+                              title: 'Join link copied',
+                              meta: 'Send it to the other players',
+                            ),
                           );
                         },
                   borderRadius: BorderRadius.circular(16),
@@ -685,9 +968,11 @@ class _GameScreenState extends State<GameScreen> {
                             ),
                             if (joinUrl != null) ...[
                               const SizedBox(width: 8),
-                              Icon(Icons.copy_rounded,
-                                  size: 16,
-                                  color: scheme.onSurfaceVariant),
+                              Icon(
+                                Icons.copy_rounded,
+                                size: 16,
+                                color: scheme.onSurfaceVariant,
+                              ),
                             ],
                           ],
                         ),
@@ -709,13 +994,14 @@ class _GameScreenState extends State<GameScreen> {
                 Text(
                   session.isHost
                       ? 'Players on the same wifi find this room '
-                          'automatically in Join, or scan the QR to open '
-                          'the game in a browser — no install needed. '
-                          'Tap the address to copy the join link.'
+                            'automatically in Join, or scan the QR to open '
+                            'the game in a browser — no install needed. '
+                            'Tap the address to copy the join link.'
                       : 'This is where the host was last seen. Reopening '
-                          'the game reconnects here.',
-                  style: textTheme.bodySmall
-                      ?.copyWith(color: scheme.onSurfaceVariant),
+                            'the game reconnects here.',
+                  style: textTheme.bodySmall?.copyWith(
+                    color: scheme.onSurfaceVariant,
+                  ),
                 ),
               ],
             ),
@@ -734,9 +1020,9 @@ class _GameScreenState extends State<GameScreen> {
         content: Text(
           session.isHost
               ? 'You are the host — leaving closes the room for everyone. '
-                  'The game is removed from this device.'
+                    'The game is removed from this device.'
               : 'You give up your seat and the game is removed from this '
-                  'device.',
+                    'device.',
         ),
         actions: [
           TextButton(
@@ -798,8 +1084,7 @@ class _GameScreenState extends State<GameScreen> {
                   if (me != null) _showPlayerCard(me);
                 case 'dashboard':
                   Navigator.of(context).push(
-                    MaterialPageRoute(
-                        builder: (_) => const DashboardScreen()),
+                    MaterialPageRoute(builder: (_) => const DashboardScreen()),
                   );
                 case 'saveBoard':
                   _saveBoardToMyBoards();
@@ -846,326 +1131,321 @@ class _GameScreenState extends State<GameScreen> {
     final turnPlayer = session.currentTurnPlayer;
 
     List<Widget> mainChildren({required bool wide}) => <Widget>[
-          BalanceCard(
-            balance: session.myBalance,
-            currencySymbol: board.currencySymbol,
-            gameName: game.name,
-            boardName: board.name,
-            trailing: _ConnectionChip(
-              status: session.connection,
-              hostEnded: session.hostEnded,
+      BalanceCard(
+        balance: session.myBalance,
+        currencySymbol: board.currencySymbol,
+        gameName: game.name,
+        boardName: board.name,
+        trailing: _ConnectionChip(
+          status: session.connection,
+          hostEnded: session.hostEnded,
+        ),
+        footer: turnPlayer == null
+            ? null
+            : _TurnChip(
+                label: [
+                  session.isMyTurn ? 'Your turn' : "${turnPlayer.name}'s turn",
+                  if (session.lastRoll != null) '🎲 ${session.lastRoll!.total}',
+                ].join(' · '),
+                highlight: session.isMyTurn,
+              ),
+      ),
+      // Auctions aren't turn-gated — anyone can be bidding at any time,
+      // so they're visible to the whole table regardless of whose turn
+      // it is.
+      if (session.auctions.isNotEmpty) ...[
+        const SizedBox(height: 14),
+        for (final auction in session.auctions.values)
+          AuctionCard(auction: auction),
+      ],
+      // A turn is roll → act → end; the controls only show up when
+      // it's actually this player's move.
+      if (session.isMyTurn) ...[
+        const SizedBox(height: 14),
+        if (session.me?.inJail == true) ...[
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: scheme.surfaceContainerHigh,
+              borderRadius: BorderRadius.circular(AppTheme.radius),
             ),
-            footer: turnPlayer == null
-                ? null
-                : _TurnChip(
-                    label: [
-                      session.isMyTurn
-                          ? 'Your turn'
-                          : "${turnPlayer.name}'s turn",
-                      if (session.lastRoll != null)
-                        '🎲 ${session.lastRoll!.total}',
-                    ].join(' · '),
-                    highlight: session.isMyTurn,
+            child: Row(
+              children: [
+                const Icon(Icons.lock_outline_rounded),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    (session.me?.jailCards ?? 0) > 0
+                        ? 'In jail — use your Get Out of Jail Free '
+                              'card, pay '
+                              '${formatMoney(board.jailFine, board.currencySymbol)}, '
+                              'or roll for doubles.'
+                        : 'In jail — pay '
+                              '${formatMoney(board.jailFine, board.currencySymbol)} '
+                              'to leave, or roll for doubles.',
+                    style: textTheme.bodyMedium,
                   ),
-          ),
-          // Auctions aren't turn-gated — anyone can be bidding at any time,
-          // so they're visible to the whole table regardless of whose turn
-          // it is.
-          if (session.auctions.isNotEmpty) ...[
-            const SizedBox(height: 14),
-            for (final auction in session.auctions.values)
-              AuctionCard(auction: auction),
-          ],
-          // A turn is roll → act → end; the controls only show up when
-          // it's actually this player's move.
-          if (session.isMyTurn) ...[
-            const SizedBox(height: 14),
-            if (session.me?.inJail == true) ...[
-              Container(
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  color: scheme.surfaceContainerHigh,
-                  borderRadius: BorderRadius.circular(AppTheme.radius),
                 ),
-                child: Row(
+                const SizedBox(width: 10),
+                // Bare in a Row (no Expanded): the theme's default
+                // minimumSize is Size.fromHeight (infinite width), so
+                // both buttons need an explicit finite-width override
+                // here or they crash the whole Row's layout.
+                if ((session.me?.jailCards ?? 0) > 0) ...[
+                  OutlinedButton(
+                    style: OutlinedButton.styleFrom(
+                      minimumSize: const Size(0, 40),
+                    ),
+                    onPressed: session.canUseJailCard ? _useJailCard : null,
+                    child: const Text('Use card'),
+                  ),
+                  const SizedBox(width: 8),
+                ],
+                FilledButton(
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size(0, 40),
+                  ),
+                  onPressed: session.canPayJailFine ? _payJailFine : null,
+                  child: const Text('Pay'),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 10),
+        ],
+        Row(
+          children: [
+            Expanded(
+              child: FilledButton.icon(
+                style: FilledButton.styleFrom(
+                  minimumSize: const Size(0, 48),
+                ),
+                onPressed: session.canRoll && _pendingRollUi == 0
+                    ? _rollDice
+                    : null,
+                icon: const Icon(Icons.casino_rounded),
+                label: Text(
+                  session.turnRolled
+                      ? 'Rolled ${session.lastRoll?.total ?? ''}'
+                      // A double by me with the turn still un-rolled
+                      // means the server granted another throw.
+                      : session.lastRoll?.isDouble == true &&
+                            session.lastRoll?.playerId == session.myPlayerId
+                      ? 'Double — roll again'
+                      : 'Roll dice',
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: FilledButton.tonalIcon(
+                style: FilledButton.styleFrom(
+                  minimumSize: const Size(0, 48),
+                ),
+                onPressed: session.canEndTurn ? session.endTurn : null,
+                icon: const Icon(Icons.skip_next_rounded),
+                label: const Text('End turn'),
+              ),
+            ),
+          ],
+        ),
+      ],
+      const SizedBox(height: 22),
+      GridView(
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: wide ? 8 : 4,
+          // Fixed cell height: the buttons keep their size instead of
+          // scaling with the window width.
+          mainAxisExtent: 104,
+          mainAxisSpacing: 10,
+        ),
+        // Money moves work the whole turn — before or after the roll —
+        // so landing effects (taxes, card payments) are payable right
+        // away; Request and Receive are never turn-gated.
+        children: [
+          QuickActionButton(
+            icon: Icons.send_rounded,
+            label: 'Send',
+            emphasized: true,
+            onTap: canResolve ? () => _openSend() : null,
+          ),
+          QuickActionButton(
+            icon: Icons.currency_exchange_rounded,
+            label: 'Request',
+            onTap: connected ? () => _openSend(mode: SendMode.request) : null,
+          ),
+          if (canScanQr)
+            QuickActionButton(
+              icon: Icons.qr_code_scanner_rounded,
+              label: 'Scan & pay',
+              // Not turn-gated: someone else's payment QR is the same
+              // "you're being asked to pay" situation as a money
+              // request, which is never turn-gated either.
+              onTap: connected ? _openScan : null,
+            ),
+          QuickActionButton(
+            icon: Icons.qr_code_2_rounded,
+            label: 'Receive',
+            onTap: connected ? _openReceive : null,
+          ),
+          // Once a board has a curated layout, landing on/passing GO
+          // pays out automatically — this manual trigger would only
+          // ever double-pay, so it's only offered without one.
+          if (board.goIndex < 0)
+            QuickActionButton(
+              icon: Icons.flag_rounded,
+              label: 'Pass GO',
+              onTap: canResolve ? _passGo : null,
+            ),
+          QuickActionButton(
+            icon: Icons.south_west_rounded,
+            label: 'Collect',
+            onTap: canResolve ? () => _openSend(mode: SendMode.collect) : null,
+          ),
+          QuickActionButton(
+            icon: Icons.style_rounded,
+            label: 'Chance',
+            onTap: canResolve ? () => _drawCard('chance') : null,
+          ),
+          QuickActionButton(
+            icon: Icons.inventory_2_outlined,
+            label: 'Chest',
+            onTap: canResolve ? () => _drawCard('chest') : null,
+          ),
+        ],
+      ),
+      const SizedBox(height: 22),
+      const SectionHeader(title: 'Players'),
+      SizedBox(
+        height: 112,
+        child: ListView.separated(
+          scrollDirection: Axis.horizontal,
+          itemCount: session.players.length,
+          separatorBuilder: (_, _) => const SizedBox(width: 8),
+          itemBuilder: (context, index) {
+            final player = session.players[index];
+            final isMe = player.id == session.myPlayerId;
+            final isTurn = player.id == session.currentTurnId;
+            return GestureDetector(
+              onTap: !isMe && !player.hasLeft && canResolve
+                  ? () => _openSend(toId: player.id)
+                  : null,
+              onLongPress: () => _showPlayerSheet(player),
+              child: SizedBox(
+                width: 64,
+                child: Column(
                   children: [
-                    const Icon(Icons.lock_outline_rounded),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        (session.me?.jailCards ?? 0) > 0
-                            ? 'In jail — use your Get Out of Jail Free '
-                                'card, pay '
-                                '${formatMoney(board.jailFine, board.currencySymbol)}, '
-                                'or roll for doubles.'
-                            : 'In jail — pay '
-                                '${formatMoney(board.jailFine, board.currencySymbol)} '
-                                'to leave, or roll for doubles.',
-                        style: textTheme.bodyMedium,
+                    PlayerAvatar(
+                      player: player,
+                      size: 54,
+                      highlight: isTurn,
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      isMe ? 'You' : player.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: textTheme.bodySmall?.copyWith(
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
-                    const SizedBox(width: 10),
-                    // Bare in a Row (no Expanded): the theme's default
-                    // minimumSize is Size.fromHeight (infinite width), so
-                    // both buttons need an explicit finite-width override
-                    // here or they crash the whole Row's layout.
-                    if ((session.me?.jailCards ?? 0) > 0) ...[
-                      OutlinedButton(
-                        style: OutlinedButton.styleFrom(
-                          minimumSize: const Size(0, 40),
-                        ),
-                        onPressed:
-                            session.canUseJailCard ? _useJailCard : null,
-                        child: const Text('Use card'),
+                    Text(
+                      formatMoney(
+                        player.balance,
+                        board.currencySymbol,
                       ),
-                      const SizedBox(width: 8),
-                    ],
-                    FilledButton(
-                      style: FilledButton.styleFrom(
-                        minimumSize: const Size(0, 40),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: textTheme.labelSmall?.copyWith(
+                        color: player.balance < 0
+                            ? AppColors.expense
+                            : scheme.onSurfaceVariant,
+                        fontWeight: FontWeight.w700,
                       ),
-                      onPressed:
-                          session.canPayJailFine ? _payJailFine : null,
-                      child: const Text('Pay'),
                     ),
                   ],
                 ),
               ),
-              const SizedBox(height: 10),
-            ],
-            Row(
-              children: [
-                Expanded(
-                  child: FilledButton.icon(
-                    style: FilledButton.styleFrom(
-                      minimumSize: const Size(0, 48),
-                    ),
-                    onPressed: session.canRoll ? _rollDice : null,
-                    icon: const Icon(Icons.casino_rounded),
-                    label: Text(
-                      session.turnRolled
-                          ? 'Rolled ${session.lastRoll?.total ?? ''}'
-                          // A double by me with the turn still un-rolled
-                          // means the server granted another throw.
-                          : session.lastRoll?.isDouble == true &&
-                                  session.lastRoll?.playerId ==
-                                      session.myPlayerId
-                              ? 'Double — roll again'
-                              : 'Roll dice',
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: FilledButton.tonalIcon(
-                    style: FilledButton.styleFrom(
-                      minimumSize: const Size(0, 48),
-                    ),
-                    onPressed:
-                        session.canEndTurn ? session.endTurn : null,
-                    icon: const Icon(Icons.skip_next_rounded),
-                    label: const Text('End turn'),
-                  ),
-                ),
-              ],
-            ),
-          ],
-          const SizedBox(height: 22),
-          GridView(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: wide ? 8 : 4,
-              // Fixed cell height: the buttons keep their size instead of
-              // scaling with the window width.
-              mainAxisExtent: 104,
-              mainAxisSpacing: 10,
-            ),
-            // Money moves work the whole turn — before or after the roll —
-            // so landing effects (taxes, card payments) are payable right
-            // away; Request and Receive are never turn-gated.
-            children: [
-              QuickActionButton(
-                icon: Icons.send_rounded,
-                label: 'Send',
-                emphasized: true,
-                onTap: canResolve ? () => _openSend() : null,
-              ),
-              QuickActionButton(
-                icon: Icons.currency_exchange_rounded,
-                label: 'Request',
-                onTap: connected
-                    ? () => _openSend(mode: SendMode.request)
-                    : null,
-              ),
-              if (canScanQr)
-                QuickActionButton(
-                  icon: Icons.qr_code_scanner_rounded,
-                  label: 'Scan & pay',
-                  onTap: canResolve ? _openScan : null,
-                ),
-              QuickActionButton(
-                icon: Icons.qr_code_2_rounded,
-                label: 'Receive',
-                onTap: connected ? _openReceive : null,
-              ),
-              // Once a board has a curated layout, landing on/passing GO
-              // pays out automatically — this manual trigger would only
-              // ever double-pay, so it's only offered without one.
-              if (board.goIndex < 0)
-                QuickActionButton(
-                  icon: Icons.flag_rounded,
-                  label: 'Pass GO',
-                  onTap: canResolve ? _passGo : null,
-                ),
-              QuickActionButton(
-                icon: Icons.south_west_rounded,
-                label: 'Collect',
-                onTap: canResolve
-                    ? () => _openSend(mode: SendMode.collect)
-                    : null,
-              ),
-              QuickActionButton(
-                icon: Icons.style_rounded,
-                label: 'Chance',
-                onTap: canResolve ? () => _drawCard('chance') : null,
-              ),
-              QuickActionButton(
-                icon: Icons.inventory_2_outlined,
-                label: 'Chest',
-                onTap: canResolve ? () => _drawCard('chest') : null,
-              ),
-            ],
-          ),
-          const SizedBox(height: 22),
-          const SectionHeader(title: 'Players'),
-          SizedBox(
-            height: 112,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              itemCount: session.players.length,
-              separatorBuilder: (_, _) => const SizedBox(width: 14),
-              itemBuilder: (context, index) {
-                final player = session.players[index];
-                final isMe = player.id == session.myPlayerId;
-                final isTurn = player.id == session.currentTurnId;
-                return GestureDetector(
-                  onTap: !isMe && !player.hasLeft && canResolve
-                      ? () => _openSend(toId: player.id)
-                      : null,
-                  onLongPress: () => _showPlayerSheet(player),
-                  child: SizedBox(
-                    width: 72,
-                    child: Column(
-                      children: [
-                        PlayerAvatar(
-                          player: player,
-                          size: 54,
-                          highlight: isTurn,
-                        ),
-                        const SizedBox(height: 6),
-                        Text(
-                          isMe ? 'You' : player.name,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: textTheme.bodySmall?.copyWith(
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        Text(
-                          formatMoney(
-                            player.balance,
-                            board.currencySymbol,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: textTheme.labelSmall?.copyWith(
-                            color: player.balance < 0
-                                ? AppColors.expense
-                                : scheme.onSurfaceVariant,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                );
-              },
-            ),
-          ),
-          const SizedBox(height: 18),
-          SectionHeader(
-            title: 'Properties',
-            trailing: TextButton(
-              onPressed: _openPropertiesList,
-              child: const Text('View all'),
-            ),
-          ),
-          InkWell(
-            onTap: _openPropertiesList,
+            );
+          },
+        ),
+      ),
+      const SizedBox(height: 18),
+      SectionHeader(
+        title: 'Properties',
+        trailing: TextButton(
+          onPressed: _openPropertiesList,
+          child: const Text('View all'),
+        ),
+      ),
+      InkWell(
+        onTap: _openPropertiesList,
+        borderRadius: BorderRadius.circular(18),
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: scheme.surfaceContainerLow,
             borderRadius: BorderRadius.circular(18),
-            child: Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: scheme.surfaceContainerLow,
-                borderRadius: BorderRadius.circular(18),
-              ),
-              child: myProperties.isEmpty
-                  ? Text(
-                      'You own nothing yet. Landed somewhere nice? '
-                      'Buy it here.',
-                      style: textTheme.bodySmall
-                          ?.copyWith(color: scheme.onSurfaceVariant),
-                    )
-                  : Wrap(
-                      spacing: 5,
-                      runSpacing: 5,
-                      children: [
-                        for (final property in myProperties)
-                          Tooltip(
-                            message: property.name,
-                            child: Container(
-                              width: 14,
-                              height: 28,
-                              decoration: BoxDecoration(
-                                color: Color(property.colorValue),
-                                borderRadius: BorderRadius.circular(4),
-                              ),
-                            ),
-                          ),
-                      ],
-                    ),
-            ),
           ),
+          child: myProperties.isEmpty
+              ? Text(
+                  'You own nothing yet. Landed somewhere nice? '
+                  'Buy it here.',
+                  style: textTheme.bodySmall?.copyWith(
+                    color: scheme.onSurfaceVariant,
+                  ),
+                )
+              : Wrap(
+                  spacing: 5,
+                  runSpacing: 5,
+                  children: [
+                    for (final property in myProperties)
+                      Tooltip(
+                        message: property.name,
+                        child: Container(
+                          width: 14,
+                          height: 28,
+                          decoration: BoxDecoration(
+                            color: Color(property.colorValue),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+        ),
+      ),
     ];
 
     List<Widget> activitySection(int limit) => [
-          SectionHeader(
-            title: 'Activity',
-            trailing: transactions.isEmpty
-                ? null
-                : TextButton(
-                    onPressed: () => Navigator.of(context).push(
-                      MaterialPageRoute(
-                          builder: (_) => const ActivityScreen()),
-                    ),
-                    child: const Text('View all'),
-                  ),
-          ),
-          if (transactions.isEmpty)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 24),
-              child: Text(
-                'No transactions yet.\nSend the first payment to get going.',
-                textAlign: TextAlign.center,
-                style: textTheme.bodyMedium
-                    ?.copyWith(color: scheme.onSurfaceVariant),
+      SectionHeader(
+        title: 'Activity',
+        trailing: transactions.isEmpty
+            ? null
+            : TextButton(
+                onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const ActivityScreen()),
+                ),
+                child: const Text('View all'),
               ),
-            )
-          else
-            ...buildActivityFeed(context, session, limit: limit),
-        ];
+      ),
+      if (transactions.isEmpty)
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 24),
+          child: Text(
+            'No transactions yet.\nSend the first payment to get going.',
+            textAlign: TextAlign.center,
+            style: textTheme.bodyMedium?.copyWith(
+              color: scheme.onSurfaceVariant,
+            ),
+          ),
+        )
+      else
+        ...buildActivityFeed(context, session, limit: limit),
+    ];
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -1211,10 +1491,10 @@ class _GameScreenState extends State<GameScreen> {
   }
 }
 
-/// A compact, non-modal panel showing the board and every token — pops up
+/// A compact modal panel showing the board and every token — pops up
 /// automatically on any roll (see `_diceRollSub` in [_GameScreenState]) and
-/// toggles via the app-bar button. Non-modal so it doesn't block the rest
-/// of the screen or get dismissed by tapping elsewhere.
+/// toggles via the app-bar button. Dismissible like any other sheet (its
+/// own close button, a drag, or tapping outside).
 class _BoardSheet extends StatelessWidget {
   const _BoardSheet({required this.onClose, required this.nfcAvailable});
 
@@ -1227,9 +1507,21 @@ class _BoardSheet extends StatelessWidget {
     final board = session.game?.board;
     if (board == null) return const SizedBox.shrink();
 
+    // Capped by height as well as width — on a short window (resized down,
+    // split-screen) the 1:1 board tied only to width would otherwise still
+    // force itself taller than the sheet has room for and overflow off the
+    // bottom; AspectRatio inside shrinks to whichever bound is tighter. The
+    // outer scroll view is a last-resort fallback for anything still too
+    // tall (title row included) rather than a way to pan/zoom the board
+    // itself, which stays a static FittedBox.
+    final maxBoardHeight = (MediaQuery.sizeOf(context).height * 0.8 - 90).clamp(
+      160.0,
+      420.0,
+    );
+
     return SafeArea(
       top: false,
-      child: Padding(
+      child: SingleChildScrollView(
         padding: const EdgeInsets.fromLTRB(16, 10, 8, 12),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -1238,10 +1530,9 @@ class _BoardSheet extends StatelessWidget {
               children: [
                 Text(
                   'Board',
-                  style: Theme.of(context)
-                      .textTheme
-                      .titleMedium
-                      ?.copyWith(fontWeight: FontWeight.w800),
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w800,
+                  ),
                 ),
                 const Spacer(),
                 IconButton(
@@ -1251,11 +1542,11 @@ class _BoardSheet extends StatelessWidget {
                 ),
               ],
             ),
-            // Capped so the 1:1 aspect ratio can't force the board taller
-            // than the sheet has room for on a wide (e.g. maximized
-            // Windows) window — it ties height to width.
             ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 420),
+              constraints: BoxConstraints(
+                maxWidth: 420,
+                maxHeight: maxBoardHeight,
+              ),
               child: BoardLayoutView(
                 board: board,
                 players: session.players,
@@ -1287,9 +1578,7 @@ class _TurnChip extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
-        color: highlight
-            ? Colors.white
-            : Colors.black.withValues(alpha: 0.22),
+        color: highlight ? Colors.white : Colors.black.withValues(alpha: 0.22),
         borderRadius: BorderRadius.circular(20),
       ),
       child: Row(
@@ -1304,9 +1593,9 @@ class _TurnChip extends StatelessWidget {
           Text(
             label,
             style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                  color: highlight ? AppColors.accent : Colors.white,
-                  fontWeight: FontWeight.w800,
-                ),
+              color: highlight ? AppColors.accent : Colors.white,
+              fontWeight: FontWeight.w800,
+            ),
           ),
         ],
       ),
@@ -1405,8 +1694,9 @@ class _DiceSheetState extends State<_DiceSheet> {
             const SizedBox(height: 16),
             Text(
               label,
-              style: textTheme.titleLarge
-                  ?.copyWith(fontWeight: FontWeight.w800),
+              style: textTheme.titleLarge?.copyWith(
+                fontWeight: FontWeight.w800,
+              ),
             ),
             const SizedBox(height: 16),
             if (!_rolling)
@@ -1417,13 +1707,14 @@ class _DiceSheetState extends State<_DiceSheet> {
                         session.canRoll
                     ? 'Doubles! Close this and roll again.'
                     : session.isMyTurn
-                        ? 'Take your actions, then end your turn.'
-                        : turnPlayer == null
-                            ? ''
-                            : "It's ${turnPlayer.name}'s turn to roll.",
+                    ? 'Take your actions, then end your turn.'
+                    : turnPlayer == null
+                    ? ''
+                    : "It's ${turnPlayer.name}'s turn to roll.",
                 textAlign: TextAlign.center,
-                style: textTheme.bodySmall
-                    ?.copyWith(color: scheme.onSurfaceVariant),
+                style: textTheme.bodySmall?.copyWith(
+                  color: scheme.onSurfaceVariant,
+                ),
               ),
           ],
         ),
@@ -1496,8 +1787,7 @@ class _IncomingRequestDialog extends StatefulWidget {
   const _IncomingRequestDialog();
 
   @override
-  State<_IncomingRequestDialog> createState() =>
-      _IncomingRequestDialogState();
+  State<_IncomingRequestDialog> createState() => _IncomingRequestDialogState();
 }
 
 class _IncomingRequestDialogState extends State<_IncomingRequestDialog> {
@@ -1546,8 +1836,9 @@ class _IncomingRequestDialogState extends State<_IncomingRequestDialog> {
           Expanded(
             child: Text(
               '${session.accountName(request.requesterId)} requests',
-              style: textTheme.titleMedium
-                  ?.copyWith(fontWeight: FontWeight.w800),
+              style: textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w800,
+              ),
             ),
           ),
         ],
@@ -1567,8 +1858,9 @@ class _IncomingRequestDialogState extends State<_IncomingRequestDialog> {
             Text(
               request.note,
               textAlign: TextAlign.center,
-              style: textTheme.bodySmall
-                  ?.copyWith(color: scheme.onSurfaceVariant),
+              style: textTheme.bodySmall?.copyWith(
+                color: scheme.onSurfaceVariant,
+              ),
             ),
           ],
           const SizedBox(height: 4),
@@ -1651,9 +1943,9 @@ class _ConnectionChip extends StatelessWidget {
           Text(
             label,
             style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w700,
-                ),
+              color: Colors.white,
+              fontWeight: FontWeight.w700,
+            ),
           ),
         ],
       ),

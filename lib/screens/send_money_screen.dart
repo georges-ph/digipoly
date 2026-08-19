@@ -32,6 +32,7 @@ class SendMoneyScreen extends StatefulWidget {
     this.mode = SendMode.pay,
     this.initialRecipientId,
     this.initialAmount = 0,
+    this.fromScannedCode = false,
   });
 
   final SendMode mode;
@@ -40,13 +41,18 @@ class SendMoneyScreen extends StatefulWidget {
   /// Prefilled amount (from a scanned payment QR); still editable.
   final int initialAmount;
 
+  /// Arrived here by scanning someone's payment QR rather than picking
+  /// "Send" myself — functionally the same as being asked to pay via a
+  /// money request (someone is asking to be paid), so it's exempt from the
+  /// turn gate the same way responding to a request already is.
+  final bool fromScannedCode;
+
   @override
   State<SendMoneyScreen> createState() => _SendMoneyScreenState();
 }
 
 class _SendMoneyScreenState extends State<SendMoneyScreen> {
-  late String _recipientId =
-      widget.initialRecipientId ?? Player.bankId;
+  late String _recipientId = widget.initialRecipientId ?? Player.bankId;
   late int _amount = widget.initialAmount;
   final _noteController = TextEditingController();
   bool _sending = false;
@@ -219,22 +225,22 @@ class _SendMoneyScreenState extends State<SendMoneyScreen> {
 
     final result = switch (widget.mode) {
       SendMode.pay => await session.sendPayment(
-          toId: _recipientId,
-          amount: _amount,
-          note: note,
-        ),
+        toId: _recipientId,
+        amount: _amount,
+        note: note,
+      ),
       SendMode.collect => await session.sendPayment(
-          fromId: Player.bankId,
-          toId: session.myPlayerId,
-          amount: _amount,
-          note: note,
-        ),
+        fromId: Player.bankId,
+        toId: session.myPlayerId,
+        amount: _amount,
+        note: note,
+      ),
       // Blocks until the other player answers on their device.
       SendMode.request => await session.requestMoney(
-          targetId: _recipientId,
-          amount: _amount,
-          note: note,
-        ),
+        targetId: _recipientId,
+        amount: _amount,
+        note: note,
+      ),
     };
 
     if (!mounted) return;
@@ -257,24 +263,27 @@ class _SendMoneyScreenState extends State<SendMoneyScreen> {
     final textTheme = Theme.of(context).textTheme;
     final scheme = Theme.of(context).colorScheme;
 
-    final hasValidRecipient =
-        !isRequest || _recipientId != Player.bankId;
-    final targetBalance =
-        isRequest ? session.playerById(_recipientId)?.balance : null;
+    final hasValidRecipient = !isRequest || _recipientId != Player.bankId;
+    final targetBalance = isRequest
+        ? session.playerById(_recipientId)?.balance
+        : null;
 
     // Block overdrafts locally too (the server rejects them anyway): my
     // balance when paying, theirs when requesting. Paying and collecting
     // work the whole turn — before or after the roll, so taxes and card
-    // effects are payable right after landing — while requests are allowed
-    // anytime, like showing a Receive code.
-    final turnOk = isRequest
+    // effects are payable right after landing — while requests, and a pay
+    // that started from scanning someone's payment QR (the same "someone's
+    // asking to be paid" situation, just without the formal request/accept
+    // round trip), are allowed anytime, like showing a Receive code.
+    final turnOk = isRequest || widget.fromScannedCode
         ? session.connection == ClientStatus.connected
         : session.canResolve;
     // The system keyboard (note field) and the amount keypad never show
     // together: the keyboard's inset would overflow the fixed column, and
     // you can't type in both places at once anyway.
     final keyboardOpen = MediaQuery.viewInsetsOf(context).bottom > 0;
-    final canSend = _amount > 0 &&
+    final canSend =
+        _amount > 0 &&
         !_sending &&
         hasValidRecipient &&
         turnOk &&
@@ -298,173 +307,231 @@ class _SendMoneyScreenState extends State<SendMoneyScreen> {
         ],
       ),
       body: SafeArea(
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 480),
-            child: Column(
-          children: [
-            if (isPay || isRequest)
-              SizedBox(
-                height: 100,
-                child: ListView(
-                  scrollDirection: Axis.horizontal,
-                  padding: const EdgeInsets.symmetric(horizontal: 20),
-                  children: [
-                    // The bank never answers requests — players only.
-                    if (isPay)
-                      _RecipientBubble(
-                        selected: _recipientId == Player.bankId,
-                        label: Player.bankName,
-                        onTap: () =>
-                            setState(() => _recipientId = Player.bankId),
-                        child: Container(
-                          width: 54,
-                          height: 54,
-                          decoration: BoxDecoration(
-                            color: scheme.surfaceContainerHigh,
-                            shape: BoxShape.circle,
-                          ),
-                          child: const Icon(
-                            Icons.account_balance_rounded,
-                            color: AppColors.accent,
-                          ),
-                        ),
-                      ),
-                    for (final player in session.otherActivePlayers)
-                      _RecipientBubble(
-                        selected: _recipientId == player.id,
-                        label: player.name,
-                        onTap: () =>
-                            setState(() => _recipientId = player.id),
-                        child: PlayerAvatar(
-                          player: player,
-                          size: 54,
-                          showPresence: false,
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-            Expanded(
-              child: Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    FittedBox(
-                      fit: BoxFit.scaleDown,
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 24),
-                        child: Text(
-                          formatMoney(_amount, symbol),
-                          style: textTheme.displayMedium?.copyWith(
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: -1,
-                            color: _amount == 0
-                                ? scheme.onSurfaceVariant
-                                    .withValues(alpha: 0.5)
-                                : scheme.onSurface,
-                          ),
-                        ),
-                      ),
-                    ),
-                    if (isRequest && targetBalance != null) ...[
-                      const SizedBox(height: 8),
-                      Text(
-                        '${session.accountName(_recipientId)} has '
-                        '${formatMoney(targetBalance, symbol)}',
-                        style: textTheme.bodySmall?.copyWith(
-                          color: _amount > targetBalance
-                              ? AppColors.expense
-                              : scheme.onSurfaceVariant,
-                          fontWeight: _amount > targetBalance
-                              ? FontWeight.w800
-                              : FontWeight.w500,
-                        ),
-                      ),
-                    ],
-                    if (isPay) ...[
-                      const SizedBox(height: 8),
-                      Text(
-                        'Balance ${formatMoney(session.myBalance, symbol)}',
-                        style: textTheme.bodySmall?.copyWith(
-                          color: _amount > session.myBalance
-                              ? AppColors.expense
-                              : scheme.onSurfaceVariant,
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: TextField(
-                controller: _noteController,
-                textCapitalization: TextCapitalization.sentences,
-                maxLength: 60,
-                decoration: const InputDecoration(
-                  hintText: 'Add a note (rent, chance card…)',
-                  counterText: '',
-                  prefixIcon: Icon(Icons.notes_rounded),
-                ),
-              ),
-            ),
-            if (!keyboardOpen)
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                child: AmountKeypad(
-                  value: _amount,
-                  onChanged: (value) => setState(() => _amount = value),
-                ),
-              ),
-            if (!isRequest && !session.canResolve)
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                child: Text(
-                  'You can send money on your turn.',
-                  textAlign: TextAlign.center,
-                  style: textTheme.bodySmall
-                      ?.copyWith(color: scheme.onSurfaceVariant),
-                ),
-              ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
-              child: FilledButton(
-                onPressed: canSend ? _confirmAndSubmit : null,
-                child: _sending
-                    ? Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: Colors.white,
+        child: LayoutBuilder(
+          builder: (context, viewportConstraints) => SingleChildScrollView(
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 480),
+                // Lets the amount block's Expanded still fill the screen
+                // and center itself on a normal-sized window, but stops it
+                // from throwing a bottom overflow if the window (or, on
+                // mobile, the keyboard) shrinks available height below
+                // what the fixed pieces (recipients, note field, keypad,
+                // button) need — it scrolls instead.
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(
+                    minHeight: viewportConstraints.maxHeight,
+                  ),
+                  child: IntrinsicHeight(
+                    child: Column(
+                      // Centers the whole cluster (recipients → amount → note →
+                      // keypad → button) as one block within the viewport instead of
+                      // stretching just the amount section to fill leftover space —
+                      // that used to make the gap between the balance line and the
+                      // note field grow or shrink with however tall the window
+                      // happened to be (native Windows window vs. a shorter web
+                      // browser viewport), even though nothing was actually
+                      // overflowing. Now that gap is a fixed SizedBox and always
+                      // looks the same; only the block's position within a taller
+                      // window shifts.
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        if (isPay || isRequest)
+                          SizedBox(
+                            height: 100,
+                            child: ListView(
+                              scrollDirection: Axis.horizontal,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 20,
+                              ),
+                              children: [
+                                // The bank never answers requests — players only.
+                                if (isPay)
+                                  _RecipientBubble(
+                                    selected: _recipientId == Player.bankId,
+                                    label: Player.bankName,
+                                    onTap: () => setState(
+                                      () => _recipientId = Player.bankId,
+                                    ),
+                                    // Matches PlayerAvatar's own ring wrapper
+                                    // (padding 3 + transparent border 3) so
+                                    // this bubble has the same total
+                                    // footprint as the player ones next to
+                                    // it — otherwise this circle reads
+                                    // visibly smaller and off-center.
+                                    child: Container(
+                                      padding: const EdgeInsets.all(3),
+                                      decoration: const BoxDecoration(
+                                        shape: BoxShape.circle,
+                                        border: Border.fromBorderSide(
+                                          BorderSide(
+                                            color: Colors.transparent,
+                                            width: 3,
+                                          ),
+                                        ),
+                                      ),
+                                      child: Container(
+                                        width: 54,
+                                        height: 54,
+                                        decoration: BoxDecoration(
+                                          color: scheme.surfaceContainerHigh,
+                                          shape: BoxShape.circle,
+                                        ),
+                                        child: const Icon(
+                                          Icons.account_balance_rounded,
+                                          color: AppColors.accent,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                for (final player in session.otherActivePlayers)
+                                  _RecipientBubble(
+                                    selected: _recipientId == player.id,
+                                    label: player.name,
+                                    onTap: () => setState(
+                                      () => _recipientId = player.id,
+                                    ),
+                                    child: PlayerAvatar(
+                                      player: player,
+                                      size: 54,
+                                      showPresence: false,
+                                    ),
+                                  ),
+                              ],
                             ),
                           ),
-                          if (isRequest) ...[
-                            const SizedBox(width: 12),
-                            Text(
-                              'Waiting for '
-                              '${session.accountName(_recipientId)}…',
+                        const SizedBox(height: 28),
+                        // Only the big amount digits scale down on their own — sharing
+                        // one FittedBox with the balance line below used to shrink both
+                        // together whenever the surrounding space got short, which made
+                        // the balance line's font size drift with available height.
+                        FittedBox(
+                          fit: BoxFit.scaleDown,
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 24),
+                            child: Text(
+                              formatMoney(_amount, symbol),
+                              style: textTheme.displayMedium?.copyWith(
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: -1,
+                                color: _amount == 0
+                                    ? scheme.onSurfaceVariant.withValues(
+                                        alpha: 0.5,
+                                      )
+                                    : scheme.onSurface,
+                              ),
                             ),
-                          ],
+                          ),
+                        ),
+                        if (isRequest && targetBalance != null) ...[
+                          const SizedBox(height: 8),
+                          Text(
+                            '${session.accountName(_recipientId)} has '
+                            '${formatMoney(targetBalance, symbol)}',
+                            style: textTheme.bodySmall?.copyWith(
+                              color: _amount > targetBalance
+                                  ? AppColors.expense
+                                  : scheme.onSurfaceVariant,
+                              fontWeight: _amount > targetBalance
+                                  ? FontWeight.w800
+                                  : FontWeight.w500,
+                            ),
+                          ),
                         ],
-                      )
-                    : Text(switch (widget.mode) {
-                        SendMode.pay =>
-                          'Send to ${session.accountName(_recipientId)}',
-                        SendMode.collect => 'Collect from the bank',
-                        SendMode.request => hasValidRecipient
-                            ? 'Request from '
-                                '${session.accountName(_recipientId)}'
-                            : 'No one to ask',
-                      }),
+                        if (isPay) ...[
+                          const SizedBox(height: 8),
+                          Text(
+                            'Balance ${formatMoney(session.myBalance, symbol)}',
+                            style: textTheme.bodySmall?.copyWith(
+                              color: _amount > session.myBalance
+                                  ? AppColors.expense
+                                  : scheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
+                        // Fixed gap before the note field — this used to be leftover
+                        // Expanded space, which meant its size (and therefore this
+                        // exact spacing) tracked total available height and differed
+                        // between a native window and a browser viewport of a
+                        // different height, even with identical content.
+                        const SizedBox(height: 28),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 20),
+                          child: TextField(
+                            controller: _noteController,
+                            textCapitalization: TextCapitalization.sentences,
+                            maxLength: 60,
+                            decoration: const InputDecoration(
+                              hintText: 'Add a note (rent, chance card…)',
+                              counterText: '',
+                              prefixIcon: Icon(Icons.notes_rounded),
+                            ),
+                          ),
+                        ),
+                        if (!keyboardOpen)
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 12),
+                            child: AmountKeypad(
+                              value: _amount,
+                              onChanged: (value) =>
+                                  setState(() => _amount = value),
+                            ),
+                          ),
+                        if (!isRequest &&
+                            !widget.fromScannedCode &&
+                            !session.canResolve)
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 20),
+                            child: Text(
+                              'You can send money on your turn.',
+                              textAlign: TextAlign.center,
+                              style: textTheme.bodySmall?.copyWith(
+                                color: scheme.onSurfaceVariant,
+                              ),
+                            ),
+                          ),
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
+                          child: FilledButton(
+                            onPressed: canSend ? _confirmAndSubmit : null,
+                            child: _sending
+                                ? Row(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      const SizedBox(
+                                        width: 20,
+                                        height: 20,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                          color: Colors.white,
+                                        ),
+                                      ),
+                                      if (isRequest) ...[
+                                        const SizedBox(width: 12),
+                                        Text(
+                                          'Waiting for '
+                                          '${session.accountName(_recipientId)}…',
+                                        ),
+                                      ],
+                                    ],
+                                  )
+                                : Text(switch (widget.mode) {
+                                    SendMode.pay =>
+                                      'Send to ${session.accountName(_recipientId)}',
+                                    SendMode.collect => 'Collect from the bank',
+                                    SendMode.request =>
+                                      hasValidRecipient
+                                          ? 'Request from '
+                                                '${session.accountName(_recipientId)}'
+                                          : 'No one to ask',
+                                  }),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
               ),
-            ),
-          ],
             ),
           ),
         ),
@@ -501,8 +568,7 @@ class _RecipientBubble extends StatelessWidget {
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 border: Border.all(
-                  color:
-                      selected ? AppColors.accent : Colors.transparent,
+                  color: selected ? AppColors.accent : Colors.transparent,
                   width: 2.5,
                 ),
               ),
@@ -514,9 +580,8 @@ class _RecipientBubble extends StatelessWidget {
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    fontWeight:
-                        selected ? FontWeight.w800 : FontWeight.w500,
-                  ),
+                fontWeight: selected ? FontWeight.w800 : FontWeight.w500,
+              ),
             ),
           ],
         ),

@@ -24,7 +24,8 @@ class BoardEditorScreen extends StatefulWidget {
 }
 
 class _BoardEditorScreenState extends State<BoardEditorScreen> {
-  late final Board _base = widget.initial ??
+  late final Board _base =
+      widget.initial ??
       Board(
         id: const Uuid().v4(),
         name: '',
@@ -34,18 +35,22 @@ class _BoardEditorScreenState extends State<BoardEditorScreen> {
       );
 
   late final _nameController = TextEditingController(text: _base.name);
-  late final _currencyController =
-      TextEditingController(text: _base.currencySymbol);
-  late final _startingController =
-      TextEditingController(text: '${_base.startingBalance}');
+  late final _currencyController = TextEditingController(
+    text: _base.currencySymbol,
+  );
+  late final _startingController = TextEditingController(
+    text: '${_base.startingBalance}',
+  );
   late final _salaryController = TextEditingController(text: '${_base.salary}');
-  late final _jailFineController =
-      TextEditingController(text: '${_base.jailFine}');
+  late final _jailFineController = TextEditingController(
+    text: '${_base.jailFine}',
+  );
 
   late final List<Property> _properties = List.of(_base.properties);
   late final List<BoardCard> _chanceCards = List.of(_base.chanceCards);
-  late final List<BoardCard> _communityCards =
-      List.of(_base.communityChestCards);
+  late final List<BoardCard> _communityCards = List.of(
+    _base.communityChestCards,
+  );
 
   bool _boardView = true;
 
@@ -71,8 +76,7 @@ class _BoardEditorScreenState extends State<BoardEditorScreen> {
       currencySymbol: _currencyController.text.trim().isEmpty
           ? r'$'
           : _currencyController.text.trim(),
-      startingBalance:
-          int.tryParse(_startingController.text.trim()) ?? 1500,
+      startingBalance: int.tryParse(_startingController.text.trim()) ?? 1500,
       salary: int.tryParse(_salaryController.text.trim()) ?? 200,
       jailFine: int.tryParse(_jailFineController.text.trim()) ?? 50,
       properties: _properties,
@@ -187,7 +191,7 @@ class _BoardEditorScreenState extends State<BoardEditorScreen> {
                         controller: _startingController,
                         keyboardType: TextInputType.number,
                         inputFormatters: [
-                          FilteringTextInputFormatter.digitsOnly
+                          FilteringTextInputFormatter.digitsOnly,
                         ],
                         decoration: const InputDecoration(
                           labelText: 'Starting balance',
@@ -204,7 +208,7 @@ class _BoardEditorScreenState extends State<BoardEditorScreen> {
                         controller: _salaryController,
                         keyboardType: TextInputType.number,
                         inputFormatters: [
-                          FilteringTextInputFormatter.digitsOnly
+                          FilteringTextInputFormatter.digitsOnly,
                         ],
                         decoration: const InputDecoration(
                           labelText: 'GO salary',
@@ -217,7 +221,7 @@ class _BoardEditorScreenState extends State<BoardEditorScreen> {
                         controller: _jailFineController,
                         keyboardType: TextInputType.number,
                         inputFormatters: [
-                          FilteringTextInputFormatter.digitsOnly
+                          FilteringTextInputFormatter.digitsOnly,
                         ],
                         decoration: const InputDecoration(
                           labelText: 'Jail fine',
@@ -257,19 +261,21 @@ class _BoardEditorScreenState extends State<BoardEditorScreen> {
                   Text(
                     _boardView
                         ? 'This is your board\'s physical layout — long-press '
-                            'and drag a square to match the real board '
-                            '(needed for the board view and auto jail/tax/GO).'
+                              'and drag a square to match the real board '
+                              '(needed for the board view and auto jail/tax/GO).'
                         : 'This order is your board\'s layout — drag to '
-                            'match the physical board (needed for the board '
-                            'view and auto jail/tax/GO).',
-                    style: textTheme.bodySmall
-                        ?.copyWith(color: scheme.onSurfaceVariant),
+                              'match the physical board (needed for the board '
+                              'view and auto jail/tax/GO).',
+                    style: textTheme.bodySmall?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                    ),
                   ),
                 if (_properties.isEmpty)
                   Text(
                     'No properties yet.',
-                    style: textTheme.bodySmall
-                        ?.copyWith(color: scheme.onSurfaceVariant),
+                    style: textTheme.bodySmall?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                    ),
                   ),
                 if (_properties.isNotEmpty && _boardView) ...[
                   const SizedBox(height: 12),
@@ -325,14 +331,16 @@ class _BoardEditorScreenState extends State<BoardEditorScreen> {
                     _properties[i].name,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: textTheme.bodyLarge
-                        ?.copyWith(fontWeight: FontWeight.w600),
+                    style: textTheme.bodyLarge?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                   subtitle: Text(
                     '${_kindLabel(_properties[i].kind)}'
                     '${_properties[i].kind.isOwnable ? ' · ${formatMoney(_properties[i].price, symbol)}' : ''}',
-                    style: textTheme.bodySmall
-                        ?.copyWith(color: scheme.onSurfaceVariant),
+                    style: textTheme.bodySmall?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                    ),
                   ),
                   trailing: ReorderableDragStartListener(
                     index: i,
@@ -490,8 +498,9 @@ class _RingTileVisual extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
-    final bandColor =
-        property.kind.isOwnable ? Color(property.colorValue) : scheme.outline;
+    final bandColor = property.kind.isOwnable
+        ? Color(property.colorValue)
+        : scheme.outline;
 
     return Container(
       decoration: BoxDecoration(
@@ -516,8 +525,9 @@ class _RingTileVisual extends StatelessWidget {
                     textAlign: TextAlign.center,
                     maxLines: 4,
                     overflow: TextOverflow.ellipsis,
-                    style: textTheme.labelSmall
-                        ?.copyWith(fontWeight: FontWeight.w700),
+                    style: textTheme.labelSmall?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                 ),
               ),
@@ -543,7 +553,9 @@ class _EmptyRingSlot extends StatelessWidget {
       child: Container(
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: scheme.outlineVariant.withValues(alpha: 0.5)),
+          border: Border.all(
+            color: scheme.outlineVariant.withValues(alpha: 0.5),
+          ),
         ),
         child: Icon(
           Icons.add_rounded,
@@ -626,8 +638,9 @@ class _CardList extends StatelessWidget {
                 ? null
                 : Text(
                     subtitleFor(card)!,
-                    style: textTheme.bodySmall
-                        ?.copyWith(color: scheme.onSurfaceVariant),
+                    style: textTheme.bodySmall?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                    ),
                   ),
             trailing: card.amount == 0
                 ? null
@@ -655,17 +668,17 @@ class _CardList extends StatelessWidget {
 // ---------------------------------------------------------------------------
 
 String _kindLabel(PropertyKind kind) => switch (kind) {
-      PropertyKind.street => 'Street',
-      PropertyKind.railroad => 'Railroad',
-      PropertyKind.utility => 'Utility',
-      PropertyKind.go => 'GO',
-      PropertyKind.jail => 'Jail',
-      PropertyKind.freeParking => 'Free Parking',
-      PropertyKind.goToJail => 'Go To Jail',
-      PropertyKind.tax => 'Tax',
-      PropertyKind.chance => 'Chance',
-      PropertyKind.communityChest => 'Community Chest',
-    };
+  PropertyKind.street => 'Street',
+  PropertyKind.railroad => 'Railroad',
+  PropertyKind.utility => 'Utility',
+  PropertyKind.go => 'GO',
+  PropertyKind.jail => 'Jail',
+  PropertyKind.freeParking => 'Free Parking',
+  PropertyKind.goToJail => 'Go To Jail',
+  PropertyKind.tax => 'Tax',
+  PropertyKind.chance => 'Chance',
+  PropertyKind.communityChest => 'Community Chest',
+};
 
 const _groupColors = [
   0xFF8B4513, // brown
@@ -692,14 +705,18 @@ class _PropertySheet extends StatefulWidget {
 }
 
 class _PropertySheetState extends State<_PropertySheet> {
-  late final _nameController =
-      TextEditingController(text: widget.initial?.name ?? '');
-  late final _priceController =
-      TextEditingController(text: _initialInt(widget.initial?.price));
-  late final _houseController =
-      TextEditingController(text: _initialInt(widget.initial?.housePrice));
-  late final _mortgageController =
-      TextEditingController(text: _initialInt(widget.initial?.mortgageValue));
+  late final _nameController = TextEditingController(
+    text: widget.initial?.name ?? '',
+  );
+  late final _priceController = TextEditingController(
+    text: _initialInt(widget.initial?.price),
+  );
+  late final _houseController = TextEditingController(
+    text: _initialInt(widget.initial?.housePrice),
+  );
+  late final _mortgageController = TextEditingController(
+    text: _initialInt(widget.initial?.mortgageValue),
+  );
 
   late PropertyKind _kind = widget.initial?.kind ?? PropertyKind.street;
   late int _color = widget.initial?.colorValue ?? _groupColors.first;
@@ -720,30 +737,29 @@ class _PropertySheetState extends State<_PropertySheet> {
       value == null || value == 0 ? '' : '$value';
 
   List<String> get _rentLabels => switch (_kind) {
-        PropertyKind.street => const [
-            'Rent',
-            '1 house',
-            '2 houses',
-            '3 houses',
-            '4 houses',
-            'Hotel',
-          ],
-        PropertyKind.railroad => const [
-            'Own 1',
-            'Own 2',
-            'Own 3',
-            'Own 4',
-          ],
-        PropertyKind.utility => const ['×1 owned', '×2 owned'],
-        PropertyKind.go ||
-        PropertyKind.jail ||
-        PropertyKind.freeParking ||
-        PropertyKind.goToJail ||
-        PropertyKind.tax ||
-        PropertyKind.chance ||
-        PropertyKind.communityChest =>
-          const [],
-      };
+    PropertyKind.street => const [
+      'Rent',
+      '1 house',
+      '2 houses',
+      '3 houses',
+      '4 houses',
+      'Hotel',
+    ],
+    PropertyKind.railroad => const [
+      'Own 1',
+      'Own 2',
+      'Own 3',
+      'Own 4',
+    ],
+    PropertyKind.utility => const ['×1 owned', '×2 owned'],
+    PropertyKind.go ||
+    PropertyKind.jail ||
+    PropertyKind.freeParking ||
+    PropertyKind.goToJail ||
+    PropertyKind.tax ||
+    PropertyKind.chance ||
+    PropertyKind.communityChest => const [],
+  };
 
   @override
   void dispose() {
@@ -802,14 +818,14 @@ class _PropertySheetState extends State<_PropertySheet> {
                 Expanded(
                   child: Text(
                     widget.initial == null ? 'New property' : 'Edit property',
-                    style: textTheme.titleLarge
-                        ?.copyWith(fontWeight: FontWeight.w800),
+                    style: textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
                   ),
                 ),
                 if (widget.initial != null)
                   IconButton(
-                    onPressed: () =>
-                        Navigator.of(context).pop((null, true)),
+                    onPressed: () => Navigator.of(context).pop((null, true)),
                     icon: const Icon(
                       Icons.delete_outline,
                       color: AppColors.expense,
@@ -827,6 +843,7 @@ class _PropertySheetState extends State<_PropertySheet> {
             const SizedBox(height: 12),
             DropdownButtonFormField<PropertyKind>(
               initialValue: _kind,
+              isExpanded: true,
               decoration: const InputDecoration(labelText: 'Kind'),
               items: [
                 for (final kind in PropertyKind.values)
@@ -870,9 +887,15 @@ class _PropertySheetState extends State<_PropertySheet> {
                 ],
               ),
               const SizedBox(height: 16),
-              Row(
+              // A Wrap (not a fixed Row) so these reflow onto their own line
+              // instead of squeezing to nothing on a narrow window — the
+              // same approach already used for the rent fields below.
+              Wrap(
+                spacing: 12,
+                runSpacing: 12,
                 children: [
-                  Expanded(
+                  SizedBox(
+                    width: 130,
                     child: TextField(
                       controller: _priceController,
                       keyboardType: TextInputType.number,
@@ -882,8 +905,8 @@ class _PropertySheetState extends State<_PropertySheet> {
                       decoration: const InputDecoration(labelText: 'Price'),
                     ),
                   ),
-                  const SizedBox(width: 12),
-                  Expanded(
+                  SizedBox(
+                    width: 130,
                     child: TextField(
                       controller: _mortgageController,
                       keyboardType: TextInputType.number,
@@ -893,20 +916,20 @@ class _PropertySheetState extends State<_PropertySheet> {
                       decoration: const InputDecoration(labelText: 'Mortgage'),
                     ),
                   ),
-                  if (_kind == PropertyKind.street) ...[
-                    const SizedBox(width: 12),
-                    Expanded(
+                  if (_kind == PropertyKind.street)
+                    SizedBox(
+                      width: 130,
                       child: TextField(
                         controller: _houseController,
                         keyboardType: TextInputType.number,
                         inputFormatters: [
                           FilteringTextInputFormatter.digitsOnly,
                         ],
-                        decoration:
-                            const InputDecoration(labelText: 'House cost'),
+                        decoration: const InputDecoration(
+                          labelText: 'House cost',
+                        ),
                       ),
                     ),
-                  ],
                 ],
               ),
               const SizedBox(height: 16),
@@ -914,8 +937,9 @@ class _PropertySheetState extends State<_PropertySheet> {
                 _kind == PropertyKind.utility
                     ? 'Rent multipliers (rent = dice × multiplier)'
                     : 'Rents',
-                style: textTheme.titleSmall
-                    ?.copyWith(fontWeight: FontWeight.w800),
+                style: textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.w800,
+                ),
               ),
               const SizedBox(height: 10),
               Wrap(
@@ -959,12 +983,12 @@ class _PropertySheetState extends State<_PropertySheet> {
 enum _CardEffect { money, move, moveBy, jailCard, buildingRepairs }
 
 String _cardEffectLabel(_CardEffect effect) => switch (effect) {
-      _CardEffect.money => 'Money',
-      _CardEffect.move => 'Move to property',
-      _CardEffect.moveBy => 'Move by spaces',
-      _CardEffect.jailCard => 'Get out of jail free',
-      _CardEffect.buildingRepairs => 'Building repairs',
-    };
+  _CardEffect.money => 'Money',
+  _CardEffect.move => 'Move to property',
+  _CardEffect.moveBy => 'Move by spaces',
+  _CardEffect.jailCard => 'Get out of jail free',
+  _CardEffect.buildingRepairs => 'Building repairs',
+};
 
 class _CardSheet extends StatefulWidget {
   const _CardSheet({this.initial, required this.properties});
@@ -979,8 +1003,9 @@ class _CardSheet extends StatefulWidget {
 }
 
 class _CardSheetState extends State<_CardSheet> {
-  late final _textController =
-      TextEditingController(text: widget.initial?.text ?? '');
+  late final _textController = TextEditingController(
+    text: widget.initial?.text ?? '',
+  );
   late final _amountController = TextEditingController(
     text: widget.initial == null || widget.initial!.amount == 0
         ? ''
@@ -1002,12 +1027,12 @@ class _CardSheetState extends State<_CardSheet> {
   late _CardEffect _effect = widget.initial?.moveToPropertyId != null
       ? _CardEffect.move
       : widget.initial?.moveBySpaces != null
-          ? _CardEffect.moveBy
-          : widget.initial?.grantsJailCard == true
-              ? _CardEffect.jailCard
-              : widget.initial?.isBuildingRepairs == true
-                  ? _CardEffect.buildingRepairs
-                  : _CardEffect.money;
+      ? _CardEffect.moveBy
+      : widget.initial?.grantsJailCard == true
+      ? _CardEffect.jailCard
+      : widget.initial?.isBuildingRepairs == true
+      ? _CardEffect.buildingRepairs
+      : _CardEffect.money;
   late String? _moveTargetId = widget.initial?.moveToPropertyId;
 
   @override
@@ -1090,65 +1115,76 @@ class _CardSheetState extends State<_CardSheet> {
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
 
-    return Padding(
-      padding: EdgeInsets.only(
-        left: 24,
-        right: 24,
-        bottom: MediaQuery.of(context).viewInsets.bottom + 24,
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  widget.initial == null ? 'New card' : 'Edit card',
-                  style: textTheme.titleLarge
-                      ?.copyWith(fontWeight: FontWeight.w800),
-                ),
-              ),
-              if (widget.initial != null)
-                IconButton(
-                  onPressed: () => Navigator.of(context).pop((null, true)),
-                  icon: const Icon(
-                    Icons.delete_outline,
-                    color: AppColors.expense,
-                  ),
-                  tooltip: 'Delete',
-                ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          TextField(
-            controller: _textController,
-            textCapitalization: TextCapitalization.sentences,
-            maxLines: 2,
-            decoration: const InputDecoration(
-              labelText: 'Card text',
-              hintText: 'Bank error in your favor',
-            ),
-          ),
-          const SizedBox(height: 12),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              for (final effect in _CardEffect.values)
-                ChoiceChip(
-                  label: Text(_cardEffectLabel(effect)),
-                  selected: _effect == effect,
-                  onSelected: (_) => setState(() => _effect = effect),
-                ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          if (_effect == _CardEffect.money)
+    // A short window (resized small, or split-screen) can't always fit this
+    // whole sheet — SafeArea + a scroll view let it shrink and scroll
+    // instead of overflowing vertically off the bottom.
+    return SafeArea(
+      top: false,
+      child: SingleChildScrollView(
+        padding: EdgeInsets.only(
+          left: 24,
+          right: 24,
+          top: 20,
+          bottom: MediaQuery.of(context).viewInsets.bottom + 24,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
             Row(
               children: [
                 Expanded(
-                  child: SegmentedButton<bool>(
+                  child: Text(
+                    widget.initial == null ? 'New card' : 'Edit card',
+                    style: textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+                if (widget.initial != null)
+                  IconButton(
+                    onPressed: () => Navigator.of(context).pop((null, true)),
+                    icon: const Icon(
+                      Icons.delete_outline,
+                      color: AppColors.expense,
+                    ),
+                    tooltip: 'Delete',
+                  ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: _textController,
+              textCapitalization: TextCapitalization.sentences,
+              maxLines: 2,
+              decoration: const InputDecoration(
+                labelText: 'Card text',
+                hintText: 'Bank error in your favor',
+              ),
+            ),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final effect in _CardEffect.values)
+                  ChoiceChip(
+                    label: Text(_cardEffectLabel(effect)),
+                    selected: _effect == effect,
+                    onSelected: (_) => setState(() => _effect = effect),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            if (_effect == _CardEffect.money)
+              // Stacked, not a Row: on a narrow window there isn't enough
+              // width left for both segments' text once a fixed-width amount
+              // field sits next to it — this always has the full sheet width
+              // to itself instead.
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  SegmentedButton<bool>(
                     segments: const [
                       ButtonSegment(value: true, label: Text('Receives')),
                       ButtonSegment(value: false, label: Text('Pays')),
@@ -1157,46 +1193,43 @@ class _CardSheetState extends State<_CardSheet> {
                     onSelectionChanged: (selection) =>
                         setState(() => _playerReceives = selection.first),
                   ),
-                ),
-                const SizedBox(width: 12),
-                SizedBox(
-                  width: 110,
-                  child: TextField(
+                  const SizedBox(height: 12),
+                  TextField(
                     controller: _amountController,
                     keyboardType: TextInputType.number,
                     inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                     decoration: const InputDecoration(labelText: 'Amount'),
                   ),
-                ),
-              ],
-            )
-          else if (_effect == _CardEffect.move)
-            if (widget.properties.isEmpty)
-              Text(
-                'Add some properties to the board first.',
-                style: textTheme.bodySmall,
-              )
-            else
-              DropdownButtonFormField<String>(
-                initialValue:
-                    widget.properties.any((p) => p.id == _moveTargetId)
-                        ? _moveTargetId
-                        : null,
-                decoration: const InputDecoration(labelText: 'Destination'),
-                items: [
-                  for (final property in widget.properties)
-                    DropdownMenuItem(
-                      value: property.id,
-                      child: Text(property.name),
-                    ),
                 ],
-                onChanged: (value) => setState(() => _moveTargetId = value),
               )
-          else if (_effect == _CardEffect.moveBy)
-            Row(
-              children: [
-                Expanded(
-                  child: SegmentedButton<bool>(
+            else if (_effect == _CardEffect.move)
+              if (widget.properties.isEmpty)
+                Text(
+                  'Add some properties to the board first.',
+                  style: textTheme.bodySmall,
+                )
+              else
+                DropdownButtonFormField<String>(
+                  initialValue:
+                      widget.properties.any((p) => p.id == _moveTargetId)
+                      ? _moveTargetId
+                      : null,
+                  isExpanded: true,
+                  decoration: const InputDecoration(labelText: 'Destination'),
+                  items: [
+                    for (final property in widget.properties)
+                      DropdownMenuItem(
+                        value: property.id,
+                        child: Text(property.name),
+                      ),
+                  ],
+                  onChanged: (value) => setState(() => _moveTargetId = value),
+                )
+            else if (_effect == _CardEffect.moveBy)
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  SegmentedButton<bool>(
                     segments: const [
                       ButtonSegment(value: false, label: Text('Back')),
                       ButtonSegment(value: true, label: Text('Forward')),
@@ -1205,50 +1238,47 @@ class _CardSheetState extends State<_CardSheet> {
                     onSelectionChanged: (selection) =>
                         setState(() => _movesForward = selection.first),
                   ),
-                ),
-                const SizedBox(width: 12),
-                SizedBox(
-                  width: 110,
-                  child: TextField(
+                  const SizedBox(height: 12),
+                  TextField(
                     controller: _spacesController,
                     keyboardType: TextInputType.number,
                     inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                     decoration: const InputDecoration(labelText: 'Spaces'),
                   ),
-                ),
-              ],
-            )
-          else if (_effect == _CardEffect.jailCard)
-            Text(
-              'The drawer keeps this card until they use it to leave jail '
-              'for free — no fine, no roll.',
-              style: textTheme.bodySmall,
-            )
-          else
-            Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _perHouseController,
-                    keyboardType: TextInputType.number,
-                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                    decoration: const InputDecoration(labelText: 'Per house'),
+                ],
+              )
+            else if (_effect == _CardEffect.jailCard)
+              Text(
+                'The drawer keeps this card until they use it to leave jail '
+                'for free — no fine, no roll.',
+                style: textTheme.bodySmall,
+              )
+            else
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _perHouseController,
+                      keyboardType: TextInputType.number,
+                      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                      decoration: const InputDecoration(labelText: 'Per house'),
+                    ),
                   ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: TextField(
-                    controller: _perHotelController,
-                    keyboardType: TextInputType.number,
-                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                    decoration: const InputDecoration(labelText: 'Per hotel'),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: TextField(
+                      controller: _perHotelController,
+                      keyboardType: TextInputType.number,
+                      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                      decoration: const InputDecoration(labelText: 'Per hotel'),
+                    ),
                   ),
-                ),
-              ],
-            ),
-          const SizedBox(height: 20),
-          FilledButton(onPressed: _save, child: const Text('Save card')),
-        ],
+                ],
+              ),
+            const SizedBox(height: 20),
+            FilledButton(onPressed: _save, child: const Text('Save card')),
+          ],
+        ),
       ),
     );
   }

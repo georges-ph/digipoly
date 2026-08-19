@@ -14,10 +14,9 @@ import '../utils/formatting.dart';
 import '../utils/snack.dart';
 import '../widgets/auction_card.dart';
 import '../widgets/player_avatar.dart';
-import 'send_money_screen.dart';
 
 /// Every property on the board with live ownership: buy, pay rent, build
-/// houses, and read/write physical NFC cards.
+/// houses, and register physical NFC cards.
 class PropertiesScreen extends StatefulWidget {
   const PropertiesScreen({super.key, this.openPropertyId});
 
@@ -49,17 +48,6 @@ class _PropertiesScreenState extends State<PropertiesScreen> {
     }
   }
 
-  @override
-  void dispose() {
-    _nfc.cancel();
-    super.dispose();
-  }
-
-  void _snack(String message) {
-    if (!mounted) return;
-    showSnack(context, message);
-  }
-
   Future<void> _openProperty(Property property) async {
     final resolved = await showPropertySheet(
       context,
@@ -69,79 +57,6 @@ class _PropertiesScreenState extends State<PropertiesScreen> {
     // Buying or paying rent settles the square you landed on — return
     // straight to the game screen instead of leaving this list in the way.
     if (resolved == true && mounted) Navigator.of(context).pop();
-  }
-
-  /// "Tap card": read a tag and open the matching property.
-  Future<void> _readCard() async {
-    final session = context.read<GameProvider>();
-    final board = session.game?.board;
-    if (board == null) return;
-
-    _showNfcWaitDialog('Hold the card near the device…');
-    final result = await _nfc.readText();
-    if (mounted) Navigator.of(context).pop(); // close the wait dialog
-    if (!mounted || result.error == NfcService.cancelled) return;
-
-    if (!result.isOk) {
-      _snack(result.error!);
-      return;
-    }
-    switch (NfcService.parsePayload(result.requireValue)) {
-      case NfcPropertyCard(:final boardId, :final propertyId):
-        if (boardId != board.id) {
-          _snack('This card belongs to a different board.');
-          return;
-        }
-        final property = session.propertyById(propertyId);
-        if (property == null) {
-          _snack('Property not found on this board.');
-          return;
-        }
-        _openProperty(property);
-      case NfcPlayerCard(:final playerId):
-        final player = session.playerById(playerId);
-        if (player == null ||
-            player.hasLeft ||
-            playerId == session.myPlayerId) {
-          _snack('Not a valid player card for this game.');
-          return;
-        }
-        Navigator.of(context).push(
-          MaterialPageRoute(
-            builder: (_) => SendMoneyScreen(initialRecipientId: playerId),
-          ),
-        );
-      case null:
-        _snack('Not a digipoly card.');
-    }
-  }
-
-  void _showNfcWaitDialog(String message) {
-    showDialog<void>(
-      context: context,
-      barrierDismissible: false,
-      builder: (dialogContext) => AlertDialog(
-        content: Row(
-          children: [
-            const SizedBox(
-              width: 24,
-              height: 24,
-              child: CircularProgressIndicator(strokeWidth: 2),
-            ),
-            const SizedBox(width: 16),
-            Expanded(child: Text(message)),
-          ],
-        ),
-        actions: [
-          TextButton(
-            // Cancelling resolves the pending operation; the flow that
-            // opened this dialog closes it.
-            onPressed: _nfc.cancel,
-            child: const Text('Cancel'),
-          ),
-        ],
-      ),
-    );
   }
 
   @override
@@ -166,17 +81,7 @@ class _PropertiesScreenState extends State<PropertiesScreen> {
         : ownable.where((p) => p.name.toLowerCase().contains(query)).toList();
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Properties'),
-        actions: [
-          if (_nfcAvailable)
-            IconButton(
-              onPressed: _readCard,
-              icon: const Icon(Icons.nfc_rounded),
-              tooltip: 'Tap a property card',
-            ),
-        ],
-      ),
+      appBar: AppBar(title: const Text('Properties')),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(20, 4, 20, 32),
         children: [
@@ -195,15 +100,17 @@ class _PropertiesScreenState extends State<PropertiesScreen> {
                       Text(
                         'You own ${mine.length} '
                         'propert${mine.length == 1 ? 'y' : 'ies'}',
-                        style: textTheme.titleSmall
-                            ?.copyWith(fontWeight: FontWeight.w800),
+                        style: textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w800,
+                        ),
                       ),
                       const SizedBox(height: 4),
                       Text(
                         'List value '
                         '${formatMoney(mineValue, board.currencySymbol)}',
-                        style: textTheme.bodySmall
-                            ?.copyWith(color: scheme.onSurfaceVariant),
+                        style: textTheme.bodySmall?.copyWith(
+                          color: scheme.onSurfaceVariant,
+                        ),
                       ),
                     ],
                   ),
@@ -249,8 +156,9 @@ class _PropertiesScreenState extends State<PropertiesScreen> {
               child: Text(
                 'No property matches "$_query".',
                 textAlign: TextAlign.center,
-                style: textTheme.bodyMedium
-                    ?.copyWith(color: scheme.onSurfaceVariant),
+                style: textTheme.bodyMedium?.copyWith(
+                  color: scheme.onSurfaceVariant,
+                ),
               ),
             )
           else
@@ -287,8 +195,9 @@ class _PropertyTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
-    final owner =
-        ownership == null ? null : session.playerById(ownership!.ownerId);
+    final owner = ownership == null
+        ? null
+        : session.playerById(ownership!.ownerId);
     final isMine = ownership?.ownerId == session.myPlayerId;
 
     final String statusText;
@@ -326,22 +235,29 @@ class _PropertyTile extends StatelessWidget {
               ),
             )
           : ownership != null && ownership!.houses > 0
-              ? Row(
-                  children: [
-                    if (ownership!.houses >= PropertyOwnership.hotel)
-                      const Icon(Icons.apartment_rounded,
-                          size: 16, color: AppColors.expense)
-                    else
-                      for (var i = 0; i < ownership!.houses; i++)
-                        const Icon(Icons.home_rounded,
-                            size: 16, color: AppColors.income),
-                  ],
-                )
-              : Text(
-                  property.kind.name,
-                  style: textTheme.bodySmall
-                      ?.copyWith(color: scheme.onSurfaceVariant),
-                ),
+          ? Row(
+              children: [
+                if (ownership!.houses >= PropertyOwnership.hotel)
+                  const Icon(
+                    Icons.apartment_rounded,
+                    size: 16,
+                    color: AppColors.expense,
+                  )
+                else
+                  for (var i = 0; i < ownership!.houses; i++)
+                    const Icon(
+                      Icons.home_rounded,
+                      size: 16,
+                      color: AppColors.income,
+                    ),
+              ],
+            )
+          : Text(
+              property.kind.name,
+              style: textTheme.bodySmall?.copyWith(
+                color: scheme.onSurfaceVariant,
+              ),
+            ),
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -391,7 +307,8 @@ Future<bool?> showPropertySheet(
   final session = context.read<GameProvider>();
   final board = session.game?.board;
   final property = session.propertyById(propertyId);
-  final decisionRequired = board != null &&
+  final decisionRequired =
+      board != null &&
       property != null &&
       property.kind.isOwnable &&
       session.ownershipOf(propertyId) == null &&
@@ -449,6 +366,7 @@ Future<bool?> showPropertySheet(
       propertyId: propertyId,
       nfcAvailable: nfcAvailable,
       onWriteCard: writeCard,
+      decisionRequired: decisionRequired,
     ),
   );
 }
@@ -458,11 +376,18 @@ class _PropertySheet extends StatefulWidget {
     required this.propertyId,
     required this.nfcAvailable,
     required this.onWriteCard,
+    required this.decisionRequired,
   });
 
   final String propertyId;
   final bool nfcAvailable;
   final VoidCallback onWriteCard;
+  // Mirrors the isDismissible/enableDrag/showDragHandle: false the sheet was
+  // opened with — a buy-or-auction decision is owed, so the system back
+  // button/gesture (which a bare showModalBottomSheet route still honors
+  // regardless of those three flags) needs blocking too, or it's still a
+  // silent way to dismiss the decision.
+  final bool decisionRequired;
 
   @override
   State<_PropertySheet> createState() => _PropertySheetState();
@@ -506,8 +431,9 @@ class _PropertySheetState extends State<_PropertySheet> {
         }
         _chargeRentFlow(payer);
       } else {
-        setState(() =>
-            _error = "To collect rent, have the payer tap their own card.");
+        setState(
+          () => _error = "To collect rent, have the payer tap their own card.",
+        );
       }
       return;
     }
@@ -517,8 +443,9 @@ class _PropertySheetState extends State<_PropertySheet> {
     final isMyCard =
         card is NfcPlayerCard && card.playerId == session.myPlayerId;
     if (!matchesProperty && !isMyCard) {
-      setState(() => _error =
-          "Tap this property's card or your own payment card.");
+      setState(
+        () => _error = "Tap this property's card or your own payment card.",
+      );
       return;
     }
     if (!session.canResolve) {
@@ -563,8 +490,8 @@ class _PropertySheetState extends State<_PropertySheet> {
       'Charge ${payer.name}?',
       rentDue != null
           ? '${formatMoney(rentDue, board.currencySymbol)} will be '
-              'collected from ${payer.name} — their card tap is the '
-              'authorization.'
+                'collected from ${payer.name} — their card tap is the '
+                'authorization.'
           : 'The rent will be collected from ${payer.name}.',
     )) {
       return;
@@ -602,7 +529,8 @@ class _PropertySheetState extends State<_PropertySheet> {
     final property = session.propertyById(widget.propertyId);
     final ownership = session.ownershipOf(widget.propertyId);
     if (board == null || property == null || ownership == null) return;
-    final ownerName = session.playerById(ownership.ownerId)?.name ?? 'the owner';
+    final ownerName =
+        session.playerById(ownership.ownerId)?.name ?? 'the owner';
 
     final myRoll = session.lastRoll?.playerId == session.myPlayerId
         ? session.lastRoll
@@ -626,7 +554,7 @@ class _PropertySheetState extends State<_PropertySheet> {
       'Pay rent?',
       rentDue != null
           ? '${formatMoney(rentDue, board.currencySymbol)} goes '
-              'to $ownerName.'
+                'to $ownerName.'
           : 'The rent goes to $ownerName.',
     )) {
       return;
@@ -638,9 +566,9 @@ class _PropertySheetState extends State<_PropertySheet> {
     );
   }
 
-  /// Starts a live, table-held auction for this unowned property — not
-  /// turn-gated, since auctions arise on other players' turns (someone
-  /// else declined to buy on *their* turn).
+  /// Declines to buy the square I'm standing on, on my own turn, sending
+  /// it to a live, table-held auction instead — the only way one starts
+  /// (the server enforces both the turn and position check too).
   void _startAuction() {
     context.read<GameProvider>().startAuction(widget.propertyId);
   }
@@ -709,11 +637,11 @@ class _PropertySheetState extends State<_PropertySheet> {
       mortgage ? 'Mortgage ${property.name}?' : 'Lift the mortgage?',
       mortgage
           ? 'The bank pays you '
-              '${formatMoney(property.mortgageValue, currency)}. No rent '
-              'can be collected until you lift the mortgage for '
-              '${formatMoney(liftCost, currency)}.'
+                '${formatMoney(property.mortgageValue, currency)}. No rent '
+                'can be collected until you lift the mortgage for '
+                '${formatMoney(liftCost, currency)}.'
           : '${formatMoney(liftCost, currency)} (value + 10% interest) '
-              'will be paid to the bank.',
+                'will be paid to the bank.',
     )) {
       return;
     }
@@ -727,8 +655,11 @@ class _PropertySheetState extends State<_PropertySheet> {
 
   /// [resolved] marks actions that settle the landed-on square (buy, pay
   /// rent); the sheet pops with it so the screen underneath can close too.
-  Future<void> _run(Future<Result<void>> Function() action,
-      {String? success, bool resolved = false}) async {
+  Future<void> _run(
+    Future<Result<void>> Function() action, {
+    String? success,
+    bool resolved = false,
+  }) async {
     if (_busy) return;
     setState(() {
       _busy = true;
@@ -772,36 +703,36 @@ class _PropertySheetState extends State<_PropertySheet> {
   }
 
   Future<int?> _askDiceTotal() => showDialog<int>(
-        context: context,
-        builder: (dialogContext) {
-          final controller = TextEditingController();
-          return AlertDialog(
-            title: const Text('Dice total'),
-            content: TextField(
-              controller: controller,
-              autofocus: true,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(
-                labelText: 'What did the dice show?',
-              ),
+    context: context,
+    builder: (dialogContext) {
+      final controller = TextEditingController();
+      return AlertDialog(
+        title: const Text('Dice total'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          keyboardType: TextInputType.number,
+          decoration: const InputDecoration(
+            labelText: 'What did the dice show?',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(minimumSize: const Size(0, 44)),
+            onPressed: () => Navigator.pop(
+              dialogContext,
+              int.tryParse(controller.text.trim()),
             ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(dialogContext),
-                child: const Text('Cancel'),
-              ),
-              FilledButton(
-                style: FilledButton.styleFrom(minimumSize: const Size(0, 44)),
-                onPressed: () => Navigator.pop(
-                  dialogContext,
-                  int.tryParse(controller.text.trim()),
-                ),
-                child: const Text('OK'),
-              ),
-            ],
-          );
-        },
+            child: const Text('OK'),
+          ),
+        ],
       );
+    },
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -816,8 +747,9 @@ class _PropertySheetState extends State<_PropertySheet> {
     final textTheme = Theme.of(context).textTheme;
     final currency = board.currencySymbol;
     final ownership = session.ownershipOf(property.id);
-    final owner =
-        ownership == null ? null : session.playerById(ownership.ownerId);
+    final owner = ownership == null
+        ? null
+        : session.playerById(ownership.ownerId);
     final isMine = ownership?.ownerId == session.myPlayerId;
     // Turn rules: buying the square you're on and paying its rent are
     // landing effects — allowed the whole turn, before or after the roll.
@@ -829,397 +761,474 @@ class _PropertySheetState extends State<_PropertySheet> {
     // table-held auction (below) is the exception, since its winner needn't
     // be the one who landed here. Boards with no curated layout track no
     // position at all, so the restriction doesn't apply to them.
-    final onThisSquare = board.goIndex < 0 ||
+    final onThisSquare =
+        board.goIndex < 0 ||
         session.me?.position == board.properties.indexOf(property);
 
-    return SafeArea(
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Row(
-              children: [
+    // Live, not the frozen widget.decisionRequired the sheet was opened
+    // with: a decision that was owed when this popped up (landing on an
+    // unowned square) can get resolved out from under it by someone else —
+    // most notably a table-held auction it turned into getting closed and
+    // won. Without re-checking, the sheet stayed locked (no back button, no
+    // tap-outside, no drag) even once there was nothing left to decide.
+    final stillDecisionRequired =
+        property.kind.isOwnable &&
+        owner == null &&
+        session.auctionFor(property.id) == null &&
+        canResolve &&
+        onThisSquare;
+
+    return PopScope(
+      canPop: !stillDecisionRequired,
+      child: SafeArea(
+        child: SingleChildScrollView(
+          // No drag handle above this content when a decision is owed (see
+          // showPropertySheet) — without its built-in spacing, the content
+          // otherwise sits flush against the sheet's top edge. The bottom
+          // inset grows with the keyboard: without it, the scroll viewport
+          // never shrinks for the keyboard, so AuctionCard's own
+          // Scrollable.ensureVisible has no obscured region to scroll the
+          // bid field clear of — the keyboard just covers it in place.
+          padding: EdgeInsets.fromLTRB(
+            24,
+            widget.decisionRequired ? 20 : 0,
+            24,
+            24 + MediaQuery.of(context).viewInsets.bottom,
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: 16,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      color: Color(property.colorValue),
+                      borderRadius: BorderRadius.circular(5),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          property.name,
+                          style: textTheme.titleLarge?.copyWith(
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        Text(
+                          owner == null
+                              ? 'Unowned · ${formatMoney(property.price, currency)}'
+                              : 'Owned by ${isMine ? 'you' : owner.name} · '
+                                    'Listed at '
+                                    '${formatMoney(property.price, currency)}'
+                                    '${(ownership?.mortgaged ?? false) ? ' · Mortgaged' : ''}',
+                          style: textTheme.bodySmall?.copyWith(
+                            color: scheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (widget.nfcAvailable)
+                    IconButton(
+                      tooltip: 'Write to NFC card',
+                      onPressed: () {
+                        Navigator.of(context).pop();
+                        widget.onWriteCard();
+                      },
+                      icon: const Icon(Icons.nfc_rounded),
+                    ),
+                  // The sheet was opened non-dismissible (no drag handle,
+                  // no tap-outside) because a decision was owed at the
+                  // time — once that's no longer true, an explicit close
+                  // button is the only way out, since the modal route's
+                  // own isDismissible/enableDrag were fixed at open time.
+                  if (widget.decisionRequired && !stillDecisionRequired)
+                    IconButton(
+                      tooltip: 'Close',
+                      onPressed: () => Navigator.of(context).pop(),
+                      icon: const Icon(Icons.close_rounded),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              _RentTable(property: property, currency: currency),
+              const SizedBox(height: 20),
+              if (owner == null) ...[
+                if (session.auctionFor(property.id) case final auction?)
+                  AuctionCard(auction: auction)
+                else if (canResolve && onThisSquare) ...[
+                  // Standing here, my turn: the official rule — buy it, or
+                  // decline and it goes to auction, not just left unowned.
+                  FilledButton.icon(
+                    onPressed: !_busy ? _buyFlow : null,
+                    icon: const Icon(Icons.shopping_bag_outlined),
+                    label: Text(
+                      'Buy for ${formatMoney(property.price, currency)}',
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  // Only one live auction at a table at a time — this one
+                  // waits its turn if another is already running elsewhere
+                  // (the server enforces this too).
+                  OutlinedButton(
+                    onPressed: !_busy && session.auctions.isEmpty
+                        ? _startAuction
+                        : null,
+                    child: Text(
+                      session.auctions.isEmpty
+                          ? 'Decline — start an auction'
+                          : 'Decline — an auction is already running',
+                    ),
+                  ),
+                ] else ...[
+                  FilledButton.icon(
+                    onPressed: null,
+                    icon: const Icon(Icons.shopping_bag_outlined),
+                    label: Text(
+                      'Buy for ${formatMoney(property.price, currency)}',
+                    ),
+                  ),
+                  if (canResolve) ...[
+                    const SizedBox(height: 6),
+                    Center(
+                      child: Text(
+                        "You're not standing here — land on it to buy at "
+                        'list price.',
+                        textAlign: TextAlign.center,
+                        style: textTheme.bodySmall?.copyWith(
+                          color: scheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
+              ] else if (!isMine && (ownership?.mortgaged ?? false))
                 Container(
-                  width: 16,
-                  height: 44,
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
-                    color: Color(property.colorValue),
-                    borderRadius: BorderRadius.circular(5),
+                    color: scheme.surfaceContainerHigh,
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Text(
+                    'Mortgaged to the bank — no rent is due until '
+                    '${owner.name} lifts the mortgage.',
+                    textAlign: TextAlign.center,
+                    style: textTheme.bodySmall?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                )
+              else if (!isMine) ...[
+                Builder(
+                  builder: (context) {
+                    // Preview the rent the server will charge. Utilities use
+                    // my own in-app roll automatically; only when there is no
+                    // roll of mine does a dice dialog appear.
+                    final isUtility = property.kind == PropertyKind.utility;
+                    final myRoll =
+                        session.lastRoll?.playerId == session.myPlayerId
+                        ? session.lastRoll
+                        : null;
+                    int? rentDue;
+                    if (!isUtility || myRoll != null) {
+                      final rent = GameEngine.computeRent(
+                        board: board,
+                        ownerships: session.ownerships,
+                        propertyId: property.id,
+                        diceTotal: myRoll?.total,
+                      );
+                      if (rent.isOk) rentDue = rent.requireValue;
+                    }
+                    // Still flagged in red as a heads-up, but no longer blocks
+                    // paying — balances are allowed to go negative rather than
+                    // leaving rent stuck unpayable.
+                    final insufficient =
+                        rentDue != null && rentDue > session.myBalance;
+
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color: AppColors.accent.withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                          child: Column(
+                            children: [
+                              Text(
+                                'Rent due',
+                                style: textTheme.labelMedium?.copyWith(
+                                  color: scheme.onSurfaceVariant,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                rentDue != null
+                                    ? formatMoney(rentDue, currency)
+                                    : 'dice roll × multiplier',
+                                style: textTheme.headlineSmall?.copyWith(
+                                  fontWeight: FontWeight.w800,
+                                  letterSpacing: -0.5,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                'Your balance '
+                                '${formatMoney(session.myBalance, currency)}',
+                                style: textTheme.bodySmall?.copyWith(
+                                  color: insufficient
+                                      ? AppColors.expense
+                                      : scheme.onSurfaceVariant,
+                                  fontWeight: insufficient
+                                      ? FontWeight.w800
+                                      : FontWeight.w500,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        FilledButton.icon(
+                          onPressed: canResolve && !_busy && onThisSquare
+                              ? _rentFlow
+                              : null,
+                          icon: const Icon(Icons.real_estate_agent_outlined),
+                          label: Text(
+                            rentDue != null
+                                ? 'Pay ${formatMoney(rentDue, currency)} '
+                                      'to ${owner.name}'
+                                : 'Pay rent to ${owner.name}',
+                          ),
+                        ),
+                        // Rent is only owed by whoever's actually on the
+                        // square, same as a plain buy — boards with no
+                        // curated layout track no position, so this only
+                        // shows where the restriction actually applies.
+                        if (canResolve && !onThisSquare) ...[
+                          const SizedBox(height: 6),
+                          Center(
+                            child: Text(
+                              "You're not standing here — land on it to "
+                              'owe rent.',
+                              textAlign: TextAlign.center,
+                              style: textTheme.bodySmall?.copyWith(
+                                color: scheme.onSurfaceVariant,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
+                    );
+                  },
+                ),
+              ] else if (isStreet) ...[
+                Text(
+                  'Buildings',
+                  style: textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w800,
                   ),
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        property.name,
-                        style: textTheme.titleLarge
-                            ?.copyWith(fontWeight: FontWeight.w800),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    IconButton.filledTonal(
+                      onPressed:
+                          canAct && !_busy && (ownership?.houses ?? 0) > 0
+                          ? () async {
+                              final refund = property.housePrice ~/ 2;
+                              if (!await _confirm(
+                                'Sell a building?',
+                                'The bank pays you back '
+                                    '${formatMoney(refund, currency)}.',
+                              )) {
+                                return;
+                              }
+                              await _run(
+                                () => session.setHouses(
+                                  property.id,
+                                  ownership!.houses - 1,
+                                ),
+                              );
+                            }
+                          : null,
+                      icon: const Icon(Icons.remove_rounded),
+                    ),
+                    Expanded(
+                      child: Center(
+                        child: Text(
+                          switch (ownership?.houses ?? 0) {
+                            0 => 'No houses',
+                            PropertyOwnership.hotel => 'Hotel',
+                            final n => '$n house${n == 1 ? '' : 's'}',
+                          },
+                          style: textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
                       ),
+                    ),
+                    IconButton.filledTonal(
+                      onPressed:
+                          canAct &&
+                              !_busy &&
+                              (ownership?.houses ?? 0) < PropertyOwnership.hotel
+                          ? () async {
+                              final next = ownership!.houses + 1;
+                              if (!await _confirm(
+                                next == PropertyOwnership.hotel
+                                    ? 'Build a hotel?'
+                                    : 'Build a house?',
+                                '${formatMoney(property.housePrice, currency)} '
+                                'will be paid to the bank.',
+                              )) {
+                                return;
+                              }
+                              await _run(
+                                () => session.setHouses(property.id, next),
+                              );
+                            }
+                          : null,
+                      icon: const Icon(Icons.add_rounded),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Center(
+                  child: Text(
+                    'House ${formatMoney(property.housePrice, currency)} · '
+                    'sells back for half',
+                    style: textTheme.bodySmall?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+              ] else
+                Center(
+                  child: Text(
+                    'You own this. Rent is collected via Pay rent on the '
+                    "payer's device.",
+                    textAlign: TextAlign.center,
+                    style: textTheme.bodySmall?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+              // Mortgaging is a bank move like sends/collects: allowed the
+              // whole turn. Hidden when the board defines no mortgage value.
+              if (isMine && property.mortgageValue > 0) ...[
+                const SizedBox(height: 14),
+                if (ownership?.mortgaged ?? false)
+                  FilledButton.tonalIcon(
+                    onPressed: canResolve && !_busy
+                        ? () => _mortgageFlow(mortgage: false)
+                        : null,
+                    icon: const Icon(Icons.lock_open_rounded),
+                    label: Text(
+                      'Lift mortgage for '
+                      '${formatMoney(GameEngine.mortgageLiftCost(property), currency)}',
+                    ),
+                  )
+                else
+                  OutlinedButton.icon(
+                    onPressed: canResolve && !_busy
+                        ? () => _mortgageFlow(mortgage: true)
+                        : null,
+                    icon: const Icon(Icons.account_balance_outlined),
+                    label: Text(
+                      'Mortgage for '
+                      '${formatMoney(property.mortgageValue, currency)}',
+                    ),
+                  ),
+              ],
+              // Trades happen at the table anytime; only the owner can hand
+              // the deed over, so no turn gate — just a live connection.
+              if (isMine) ...[
+                const SizedBox(height: 4),
+                Center(
+                  child: TextButton.icon(
+                    onPressed:
+                        session.connection == ClientStatus.connected && !_busy
+                        ? _transferFlow
+                        : null,
+                    icon: const Icon(Icons.swap_horiz_rounded, size: 18),
+                    label: const Text('Transfer to another player'),
+                  ),
+                ),
+              ],
+              // Only the owner benefits from an NFC hint here: buying or
+              // paying rent already has a button right in front of whoever's
+              // holding this phone, so tapping a card to trigger the same
+              // action would be pointless. The owner's phone, though, doubles
+              // as a payment terminal — another player taps their own card on
+              // it to pay rent, so that's worth calling out.
+              if (widget.nfcAvailable && isMine && owner != null) ...[
+                const SizedBox(height: 10),
+                Center(
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.nfc_rounded,
+                        size: 14,
+                        color: scheme.onSurfaceVariant,
+                      ),
+                      const SizedBox(width: 6),
                       Text(
-                        owner == null
-                            ? 'Unowned · ${formatMoney(property.price, currency)}'
-                            : 'Owned by ${isMine ? 'you' : owner.name}'
-                                '${(ownership?.mortgaged ?? false) ? ' · Mortgaged' : ''}',
-                        style: textTheme.bodySmall
-                            ?.copyWith(color: scheme.onSurfaceVariant),
+                        'Have them tap their card here to charge rent',
+                        style: textTheme.bodySmall?.copyWith(
+                          color: scheme.onSurfaceVariant,
+                        ),
                       ),
                     ],
                   ),
                 ),
-                if (widget.nfcAvailable)
-                  IconButton(
-                    tooltip: 'Write to NFC card',
-                    onPressed: () {
-                      Navigator.of(context).pop();
-                      widget.onWriteCard();
-                    },
-                    icon: const Icon(Icons.nfc_rounded),
-                  ),
               ],
-            ),
-            const SizedBox(height: 16),
-            _RentTable(property: property, currency: currency),
-            const SizedBox(height: 20),
-            if (owner == null) ...[
-              if (session.auctionFor(property.id) case final auction?)
-                AuctionCard(auction: auction)
-              else if (canResolve && onThisSquare) ...[
-                // Standing here, my turn: the official rule — buy it, or
-                // decline and it goes to auction, not just left unowned.
-                FilledButton.icon(
-                  onPressed: !_busy ? _buyFlow : null,
-                  icon: const Icon(Icons.shopping_bag_outlined),
-                  label: Text(
-                    'Buy for ${formatMoney(property.price, currency)}',
-                  ),
-                ),
-                const SizedBox(height: 8),
-                OutlinedButton(
-                  onPressed: !_busy ? _startAuction : null,
-                  child: const Text('Decline — start an auction'),
-                ),
-              ] else ...[
-                FilledButton.icon(
-                  onPressed: null,
-                  icon: const Icon(Icons.shopping_bag_outlined),
-                  label: Text(
-                    'Buy for ${formatMoney(property.price, currency)}',
-                  ),
-                ),
-                if (canResolve) ...[
-                  const SizedBox(height: 6),
-                  Center(
-                    child: Text(
-                      "You're not standing here — land on it to buy at "
-                      'list price.',
-                      textAlign: TextAlign.center,
-                      style: textTheme.bodySmall
-                          ?.copyWith(color: scheme.onSurfaceVariant),
-                    ),
-                  ),
-                ],
-                // Auctions happen out loud at the table — the winner
-                // needn't be standing here, so anyone can start one even
-                // when nobody's actively resolving a landing on it.
+              if (!canResolve && ownership?.ownerId != session.myPlayerId) ...[
+                const SizedBox(height: 10),
                 Center(
-                  child: TextButton(
-                    onPressed: session.connection == ClientStatus.connected &&
-                            !_busy
-                        ? _startAuction
-                        : null,
-                    child: const Text('Start an auction'),
+                  child: Text(
+                    'Buying and paying rent unlock on your turn.',
+                    style: textTheme.bodySmall?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                    ),
                   ),
                 ),
               ],
-            ]
-            else if (!isMine && (ownership?.mortgaged ?? false))
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: scheme.surfaceContainerHigh,
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: Text(
-                  'Mortgaged to the bank — no rent is due until '
-                  '${owner.name} lifts the mortgage.',
-                  textAlign: TextAlign.center,
-                  style: textTheme.bodySmall
-                      ?.copyWith(color: scheme.onSurfaceVariant),
-                ),
-              )
-            else if (!isMine) ...[
-              Builder(builder: (context) {
-                // Preview the rent the server will charge. Utilities use
-                // my own in-app roll automatically; only when there is no
-                // roll of mine does a dice dialog appear.
-                final isUtility = property.kind == PropertyKind.utility;
-                final myRoll = session.lastRoll?.playerId == session.myPlayerId
-                    ? session.lastRoll
-                    : null;
-                int? rentDue;
-                if (!isUtility || myRoll != null) {
-                  final rent = GameEngine.computeRent(
-                    board: board,
-                    ownerships: session.ownerships,
-                    propertyId: property.id,
-                    diceTotal: myRoll?.total,
-                  );
-                  if (rent.isOk) rentDue = rent.requireValue;
-                }
-                // Still flagged in red as a heads-up, but no longer blocks
-                // paying — balances are allowed to go negative rather than
-                // leaving rent stuck unpayable.
-                final insufficient =
-                    rentDue != null && rentDue > session.myBalance;
-
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: AppColors.accent.withValues(alpha: 0.12),
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                      child: Column(
-                        children: [
-                          Text(
-                            'Rent due',
-                            style: textTheme.labelMedium?.copyWith(
-                              color: scheme.onSurfaceVariant,
-                              fontWeight: FontWeight.w800,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            rentDue != null
-                                ? formatMoney(rentDue, currency)
-                                : 'dice roll × multiplier',
-                            style: textTheme.headlineSmall?.copyWith(
-                              fontWeight: FontWeight.w800,
-                              letterSpacing: -0.5,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            'Your balance '
-                            '${formatMoney(session.myBalance, currency)}',
-                            style: textTheme.bodySmall?.copyWith(
-                              color: insufficient
-                                  ? AppColors.expense
-                                  : scheme.onSurfaceVariant,
-                              fontWeight: insufficient
-                                  ? FontWeight.w800
-                                  : FontWeight.w500,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    FilledButton.icon(
-                      onPressed: canResolve && !_busy ? _rentFlow : null,
-                      icon: const Icon(Icons.real_estate_agent_outlined),
-                      label: Text(
-                        rentDue != null
-                            ? 'Pay ${formatMoney(rentDue, currency)} '
-                                'to ${owner.name}'
-                            : 'Pay rent to ${owner.name}',
-                      ),
-                    ),
-                  ],
-                );
-              }),
-            ]
-            else if (isStreet) ...[
-              Text(
-                'Buildings',
-                style: textTheme.titleSmall
-                    ?.copyWith(fontWeight: FontWeight.w800),
-              ),
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  IconButton.filledTonal(
-                    onPressed: canAct &&
-                            !_busy &&
-                            (ownership?.houses ?? 0) > 0
-                        ? () async {
-                            final refund = property.housePrice ~/ 2;
-                            if (!await _confirm(
-                              'Sell a building?',
-                              'The bank pays you back '
-                                  '${formatMoney(refund, currency)}.',
-                            )) {
-                              return;
-                            }
-                            await _run(() => session.setHouses(
-                                property.id, ownership!.houses - 1));
-                          }
-                        : null,
-                    icon: const Icon(Icons.remove_rounded),
-                  ),
-                  Expanded(
-                    child: Center(
-                      child: Text(
-                        switch (ownership?.houses ?? 0) {
-                          0 => 'No houses',
-                          PropertyOwnership.hotel => 'Hotel',
-                          final n => '$n house${n == 1 ? '' : 's'}',
-                        },
-                        style: textTheme.titleMedium
-                            ?.copyWith(fontWeight: FontWeight.w800),
-                      ),
+              if (isMine && isStreet && !canAct) ...[
+                const SizedBox(height: 10),
+                Center(
+                  child: Text(
+                    'Buildings change on your turn, before you roll.',
+                    style: textTheme.bodySmall?.copyWith(
+                      color: scheme.onSurfaceVariant,
                     ),
                   ),
-                  IconButton.filledTonal(
-                    onPressed: canAct &&
-                            !_busy &&
-                            (ownership?.houses ?? 0) <
-                                PropertyOwnership.hotel
-                        ? () async {
-                            final next = ownership!.houses + 1;
-                            if (!await _confirm(
-                              next == PropertyOwnership.hotel
-                                  ? 'Build a hotel?'
-                                  : 'Build a house?',
-                              '${formatMoney(property.housePrice, currency)} '
-                                  'will be paid to the bank.',
-                            )) {
-                              return;
-                            }
-                            await _run(
-                                () => session.setHouses(property.id, next));
-                          }
-                        : null,
-                    icon: const Icon(Icons.add_rounded),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 4),
-              Center(
-                child: Text(
-                  'House ${formatMoney(property.housePrice, currency)} · '
-                  'sells back for half',
-                  style: textTheme.bodySmall
-                      ?.copyWith(color: scheme.onSurfaceVariant),
                 ),
-              ),
-            ] else
-              Center(
-                child: Text(
-                  'You own this. Rent is collected via Pay rent on the '
-                  "payer's device.",
-                  textAlign: TextAlign.center,
-                  style: textTheme.bodySmall
-                      ?.copyWith(color: scheme.onSurfaceVariant),
-                ),
-              ),
-            // Mortgaging is a bank move like sends/collects: allowed the
-            // whole turn. Hidden when the board defines no mortgage value.
-            if (isMine && property.mortgageValue > 0) ...[
-              const SizedBox(height: 14),
-              if (ownership?.mortgaged ?? false)
-                FilledButton.tonalIcon(
-                  onPressed: canResolve && !_busy
-                      ? () => _mortgageFlow(mortgage: false)
-                      : null,
-                  icon: const Icon(Icons.lock_open_rounded),
-                  label: Text(
-                    'Lift mortgage for '
-                    '${formatMoney(GameEngine.mortgageLiftCost(property), currency)}',
-                  ),
-                )
-              else
-                OutlinedButton.icon(
-                  onPressed: canResolve && !_busy
-                      ? () => _mortgageFlow(mortgage: true)
-                      : null,
-                  icon: const Icon(Icons.account_balance_outlined),
-                  label: Text(
-                    'Mortgage for '
-                    '${formatMoney(property.mortgageValue, currency)}',
-                  ),
-                ),
-            ],
-            // Trades happen at the table anytime; only the owner can hand
-            // the deed over, so no turn gate — just a live connection.
-            if (isMine) ...[
-              const SizedBox(height: 4),
-              Center(
-                child: TextButton.icon(
-                  onPressed: session.connection == ClientStatus.connected &&
-                          !_busy
-                      ? _transferFlow
-                      : null,
-                  icon: const Icon(Icons.swap_horiz_rounded, size: 18),
-                  label: const Text('Transfer to another player'),
-                ),
-              ),
-            ],
-            // Only the owner benefits from an NFC hint here: buying or
-            // paying rent already has a button right in front of whoever's
-            // holding this phone, so tapping a card to trigger the same
-            // action would be pointless. The owner's phone, though, doubles
-            // as a payment terminal — another player taps their own card on
-            // it to pay rent, so that's worth calling out.
-            if (widget.nfcAvailable && isMine && owner != null) ...[
-              const SizedBox(height: 10),
-              Center(
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.nfc_rounded,
-                        size: 14, color: scheme.onSurfaceVariant),
-                    const SizedBox(width: 6),
-                    Text(
-                      'Have them tap their card here to charge rent',
-                      style: textTheme.bodySmall
-                          ?.copyWith(color: scheme.onSurfaceVariant),
+              ],
+              if (_error != null) ...[
+                const SizedBox(height: 10),
+                Center(
+                  child: Text(
+                    _error!,
+                    textAlign: TextAlign.center,
+                    style: textTheme.bodySmall?.copyWith(
+                      color: AppColors.expense,
+                      fontWeight: FontWeight.w700,
                     ),
-                  ],
-                ),
-              ),
-            ],
-            if (!canResolve && ownership?.ownerId != session.myPlayerId) ...[
-              const SizedBox(height: 10),
-              Center(
-                child: Text(
-                  'Buying and paying rent unlock on your turn.',
-                  style: textTheme.bodySmall
-                      ?.copyWith(color: scheme.onSurfaceVariant),
-                ),
-              ),
-            ],
-            if (isMine && isStreet && !canAct) ...[
-              const SizedBox(height: 10),
-              Center(
-                child: Text(
-                  'Buildings change on your turn, before you roll.',
-                  style: textTheme.bodySmall
-                      ?.copyWith(color: scheme.onSurfaceVariant),
-                ),
-              ),
-            ],
-            if (_error != null) ...[
-              const SizedBox(height: 10),
-              Center(
-                child: Text(
-                  _error!,
-                  textAlign: TextAlign.center,
-                  style: textTheme.bodySmall?.copyWith(
-                    color: AppColors.expense,
-                    fontWeight: FontWeight.w700,
                   ),
                 ),
-              ),
+              ],
             ],
-          ],
+          ),
         ),
       ),
     );
@@ -1290,36 +1299,41 @@ class _RentTable extends StatelessWidget {
                   Expanded(
                     child: Text(
                       label,
-                      style: textTheme.bodySmall
-                          ?.copyWith(color: scheme.onSurfaceVariant),
+                      style: textTheme.bodySmall?.copyWith(
+                        color: scheme.onSurfaceVariant,
+                      ),
                     ),
                   ),
                   Text(
                     value,
-                    style: textTheme.bodySmall
-                        ?.copyWith(fontWeight: FontWeight.w800),
+                    style: textTheme.bodySmall?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
                   ),
                 ],
               ),
             ),
           if (property.mortgageValue > 0 || property.housePrice > 0) ...[
             const Divider(height: 16),
+            const SizedBox(height: 4),
             Row(
               children: [
                 if (property.housePrice > 0)
                   Expanded(
                     child: Text(
                       'House ${formatMoney(property.housePrice, currency)}',
-                      style: textTheme.bodySmall
-                          ?.copyWith(color: scheme.onSurfaceVariant),
+                      style: textTheme.bodySmall?.copyWith(
+                        color: scheme.onSurfaceVariant,
+                      ),
                     ),
                   ),
                 if (property.mortgageValue > 0)
                   Text(
                     'Mortgage '
                     '${formatMoney(property.mortgageValue, currency)}',
-                    style: textTheme.bodySmall
-                        ?.copyWith(color: scheme.onSurfaceVariant),
+                    style: textTheme.bodySmall?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                    ),
                   ),
               ],
             ),

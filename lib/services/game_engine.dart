@@ -331,6 +331,21 @@ abstract final class GameEngine {
     if (ownership.houses > 0) {
       return err('Sell the buildings on ${property.name} first.');
     }
+    // Giving away one street breaks the sender's monopoly on the rest of
+    // the color group — and building (in either direction) requires owning
+    // the whole group, so any houses left standing there would become
+    // permanently unsellable. Block the transfer until those are gone too.
+    if (property.kind == PropertyKind.street &&
+        board.properties.any((p) =>
+            p.id != property.id &&
+            p.kind == PropertyKind.street &&
+            p.colorValue == property.colorValue &&
+            ownerships[p.id]?.ownerId == senderId &&
+            (ownerships[p.id]?.houses ?? 0) > 0)) {
+      return err(
+        'Sell the buildings on the rest of this color group first.',
+      );
+    }
     return ok(target);
   }
 

@@ -1,19 +1,18 @@
 import 'package:flutter/material.dart';
 
+import '../models/player.dart';
 import '../providers/game_provider.dart';
 import '../utils/formatting.dart';
 import 'transaction_details_sheet.dart';
 import 'transaction_tile.dart';
 
-/// Transaction tiles with day headers (Today / Yesterday / date) and, on
-/// rows the viewer is actually a party to, their own running balance right
-/// after that transaction — computed backwards from their current balance.
-/// Rows between two other players carry no balance annotation: this feed is
-/// shared across every device, but there's only ever one player's balance
-/// (the viewer's own) to walk backwards from, so showing it next to a
-/// transaction that isn't theirs would just be someone else's number
-/// mislabeled. Shared by the game screen (teaser) and the full activity
-/// screen.
+/// Transaction tiles with day headers (Today / Yesterday / date) and a
+/// running balance right after that transaction, for whichever player it's
+/// most relevant to — computed backwards from every player's *current*
+/// balance (all live in [GameProvider.players], not just the viewer's own),
+/// so this works the same for a row the viewer is a party to and one
+/// between two other players. Shared by the game screen (teaser), the full
+/// activity screen, and the dashboard.
 List<Widget> buildActivityFeed(
   BuildContext context,
   GameProvider session, {
@@ -25,14 +24,36 @@ List<Widget> buildActivityFeed(
 
   final widgets = <Widget>[];
   String? lastDay;
-  var running = session.myBalance;
+  final runningByPlayer = <String, int>{
+    for (final p in session.players) p.id: p.balance,
+  };
   var shown = 0;
   for (final tx in session.transactions) {
     final involvesMe =
         tx.toId == session.myPlayerId || tx.fromId == session.myPlayerId;
-    final balanceAfter = involvesMe ? running : null;
-    if (tx.toId == session.myPlayerId) running -= tx.amount;
-    if (tx.fromId == session.myPlayerId) running += tx.amount;
+    // The bank has no real balance to show — prefer the viewer's own side,
+    // then whichever side is an actual player (the recipient first, since
+    // that mirrors the "incoming" framing everywhere else in the feed).
+    final String? balanceOwnerId;
+    if (involvesMe) {
+      balanceOwnerId = session.myPlayerId;
+    } else if (tx.toId != Player.bankId) {
+      balanceOwnerId = tx.toId;
+    } else if (tx.fromId != Player.bankId) {
+      balanceOwnerId = tx.fromId;
+    } else {
+      balanceOwnerId = null;
+    }
+    final balanceAfter = balanceOwnerId == null
+        ? null
+        : runningByPlayer[balanceOwnerId];
+    if (tx.toId != Player.bankId) {
+      runningByPlayer[tx.toId] = (runningByPlayer[tx.toId] ?? 0) - tx.amount;
+    }
+    if (tx.fromId != Player.bankId) {
+      runningByPlayer[tx.fromId] =
+          (runningByPlayer[tx.fromId] ?? 0) + tx.amount;
+    }
 
     if (limit != null && shown >= limit) continue;
     shown++;
@@ -40,35 +61,40 @@ List<Widget> buildActivityFeed(
     final day = formatDay(tx.timestamp);
     if (day != lastDay) {
       lastDay = day;
-      widgets.add(Padding(
-        padding: const EdgeInsets.only(top: 10, bottom: 4),
-        child: Text(
-          day,
-          style: textTheme.labelMedium?.copyWith(
-            color: scheme.onSurfaceVariant,
-            fontWeight: FontWeight.w800,
-            letterSpacing: 0.3,
+      widgets.add(
+        Padding(
+          padding: const EdgeInsets.only(top: 10, bottom: 4),
+          child: Text(
+            day,
+            style: textTheme.labelMedium?.copyWith(
+              color: scheme.onSurfaceVariant,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 0.3,
+            ),
           ),
         ),
-      ));
+      );
     }
-    widgets.add(TransactionTile(
-      transaction: tx,
-      myPlayerId: session.myPlayerId,
-      currencySymbol: currency,
-      nameOf: session.accountName,
-      propertyNameOf: session.propertyNameOf,
-      balanceAfter: balanceAfter,
-      onTap: () => showModalBottomSheet<void>(
-        context: context,
-        isScrollControlled: true,
-        builder: (_) => TransactionDetailsSheet(
-          transaction: tx,
-          session: session,
-          balanceAfter: balanceAfter,
+    widgets.add(
+      TransactionTile(
+        transaction: tx,
+        myPlayerId: session.myPlayerId,
+        currencySymbol: currency,
+        nameOf: session.accountName,
+        propertyNameOf: session.propertyNameOf,
+        balanceAfter: balanceAfter,
+        onTap: () => showModalBottomSheet<void>(
+          context: context,
+          isScrollControlled: true,
+          builder: (_) => TransactionDetailsSheet(
+            transaction: tx,
+            session: session,
+            balanceAfter: balanceAfter,
+            balanceAfterOwnerId: balanceOwnerId,
+          ),
         ),
       ),
-    ));
+    );
   }
   return widgets;
 }

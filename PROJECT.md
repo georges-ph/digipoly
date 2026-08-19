@@ -49,13 +49,16 @@ board — boards with different names/currencies/properties must all work.
   the landing → end*. Two gates in `GameProvider`:
   - `canAct` (my turn, **before** the roll): building/selling houses only.
   - `canResolve` (my turn, before **or** after the roll): every money move
-    — free-form sends, collecting from the bank, Scan & pay — and landing
-    effects: buying the square you're on, paying its rent, Chance/Community
-    Chest, Pass GO. Post-roll sends matter because taxes and card effects
-    ("pay each player…") are settled via Send after landing.
+    — free-form sends, collecting from the bank — and landing effects:
+    buying the square you're on, paying its rent, Chance/Community Chest,
+    Pass GO. Post-roll sends matter because taxes and card effects ("pay
+    each player…") are settled via Send after landing.
   "End turn" stays disabled until you rolled (enforced server-side too).
-  Exceptions: **requesting money and answering a money request are allowed
-  anytime** (like showing a Receive code).
+  Exceptions: **requesting money, answering a money request, and paying via
+  a scanned payment QR are allowed anytime** (like showing a Receive code)
+  — scanning someone's QR is the same "you're being asked to pay" situation
+  as a request, just without the formal accept/decline round trip
+  (`SendMoneyScreen.fromScannedCode`).
 - **Dice are server-side**: one roll per turn, only by the current player
   (`rollDice`/`diceRolled`), same result on every device, shown on the
   balance-card turn chip, dice sheet and dashboard. **Doubles roll again**:
@@ -93,7 +96,13 @@ board — boards with different names/currencies/properties must all work.
   buy is only valid for the square your own token is actually on (checked
   both client- and server-side via `GameEngine.validatePurchase`'s position
   check) — boards with no curated layout track no position, so the
-  restriction doesn't apply there. Building
+  restriction doesn't apply there. Paying rent gets the same treatment:
+  the payer must actually be standing on that square (`_handlePayRent`
+  checks `payer.position`, not just who owns the property — same
+  no-curated-layout exemption), so a player can't browse to some other
+  property owned by the same opponent and pay rent on it from across the
+  board; miss the moment (nobody asks, the payer doesn't pay) and it's
+  gone until they land there again, same as real Monopoly. Building
   requires owning the **whole color group** and follows the **even-building
   rule**: no street of the group may end up more than one house apart from
   another — building spreads across the group, selling comes off the
@@ -101,36 +110,48 @@ board — boards with different names/currencies/properties must all work.
   ±1). Sell-back refunds half. Rent auto-computed: street tiers, double
   base rent on a full unbuilt group, railroads by count owned, utilities =
   multiplier × dice (uses the payer's own in-app roll automatically).
-- **Live auctions**: any connected player can start an auction for an
-  unowned property from its sheet ("Start an auction") — not turn-gated,
-  since auctions arise on other players' turns. The player actually
-  standing on an unowned square, on their turn, sees this as an explicit
-  **"Decline — start an auction"** button instead (the official rule:
-  declining a landing sends it to auction, not just leaving it unowned
-  indefinitely) — everyone else still gets the plain link, since starting
-  one isn't tied to their own landing. Everyone connected sees a
-  shared live `AuctionCard` (game screen, dashboard, and the property
-  sheet) with the current bid and who's leading; anyone can raise it
-  anytime, no turn order, as long as it beats the current bid and they can
-  afford it; anyone can close it, selling to the top bidder at their bid
-  (skips the "must be standing on it" check, same as any explicit-price
-  buy) or cancelling if nobody bid — **except the leading bidder
-  themselves**, who the server refuses to let close their own auction (a
-  confirmation dialog on the client, plus a hard server-side check): with
-  no guard, anyone could start an auction, bid low once, and immediately
-  sell it to themselves before anyone else had a chance to bid. Someone
-  else at the table has to close it (cancelling with no bids at all is
-  still open to anyone, including the starter). State lives server-side
-  only (`GameServer._auctions`, `PropertyAuction` model) — not persisted to
-  the DB, but replayed to (re)connecting clients via the snapshot, so a
-  table restart or reconnect doesn't need to restart mid-auction. Wire:
-  `startAuction`/`placeBid`/`closeAuction` intents,
+- **Live auctions**: mirrors the official rule exactly — the only way one
+  starts is the player standing on an unowned square, on their own turn,
+  declining to buy it (**"Decline — start an auction"** on the property
+  sheet). There's no free-form "auction any property, anytime" path; an
+  earlier version had one, but it let a player force a sale on a square
+  they had no actual claim to, with no basis in the rules. Both the turn
+  and the position are enforced server-side too (`_handleStartAuction`) —
+  boards with no curated layout track no position at all, so only the turn
+  check applies there, same exemption `GameEngine.validatePurchase` already
+  makes for a plain buy. Only one auction runs at a time table-wide —
+  starting a second while one is already running is rejected server-side,
+  and the client disables "Decline — start an auction" (with an
+  explanatory label swap) whenever `GameProvider.auctions` isn't empty, so
+  the rejection round-trip is the rare case rather than the norm. Everyone
+  connected sees a shared live `AuctionCard` (game screen, dashboard, and
+  the property sheet) with the current bid and who's leading; anyone can
+  raise it anytime, no turn order, as long as it beats the current bid and
+  they can afford it; anyone can close it, selling to the top bidder at
+  their bid (skips the "must be standing on it" check, same as any
+  explicit-price buy) or cancelling if nobody bid — **except the leading
+  bidder themselves**, who the server refuses to let close their own
+  auction (a confirmation dialog on the client, plus a hard server-side
+  check): with no guard, anyone could start an auction, bid low once, and
+  immediately sell it to themselves before anyone else had a chance to
+  bid. Someone else at the table has to close it (cancelling with no bids
+  at all is still open to anyone, including the starter). State lives
+  server-side only (`GameServer._auctions`, `PropertyAuction` model) — not
+  persisted to the DB, but replayed to (re)connecting clients via the
+  snapshot, so a table restart or reconnect doesn't need to restart
+  mid-auction. Wire: `startAuction`/`placeBid`/`closeAuction` intents,
   `auctionStarted`/`auctionBid`/`auctionClosed`/`auctionRejected` events.
 - **Trades (property transfer)**: the owner hands a deed to another player
   from the property sheet ("Transfer to another player" → pick → confirm).
-  No money moves — the deal's cash is a normal Send; buildings must be
-  sold first, a mortgage travels with the property. Not turn-gated (trades
-  happen anytime at the table). Wire: `transferProperty` intent; the
+  No money moves — the deal's cash is a normal Send; buildings on the
+  property itself must be sold first. Giving it away also breaks the
+  sender's monopoly on the rest of that color group, and building requires
+  owning the whole group in *both* directions (even selling — see
+  Properties above), so any houses still standing on the sender's other
+  streets in that same group must come down too, or they'd be stuck
+  unsellable once the group splits. A mortgage travels with the property.
+  Not turn-gated (trades happen anytime at the table). Wire:
+  `transferProperty` intent; the
   `propertyChanged` broadcast carries the intent's `txId` so the sender's
   pending future resolves, alongside a $0 `TransactionType.transfer`
   logged in the activity feed (the only transaction type that never moves
@@ -151,8 +172,19 @@ board — boards with different names/currencies/properties must all work.
   board's deck **on the server** — a shuffled pile per deck, dealt in order
   and reshuffled from scratch only once it runs out, like a physical stack
   (not an independent random pick each time, which could repeat the same
-  card); revealed in a dialog on every device; money effect auto-applied as
-  a `card` transaction. A card is exactly one of: a money card, a **"go to
+  card); revealed in a dialog on every device — but not all at once: the
+  server resolves a roll's landing (and broadcasts the card) *before* it
+  broadcasts the roll itself, so the card would otherwise reach every other
+  device before the drawer has necessarily even seen their own dice result.
+  Each device holds off showing anyone else's copy of the dialog until that
+  player's own device signals (`dismissRoll` intent → `rollDismissed` event)
+  that its own copy is about to appear — which, for a roll-triggered draw,
+  is already gated behind that device's own dice sheet closing, and for a
+  manual quick-action draw (no dice sheet involved) fires immediately. A
+  generous timeout (`GameScreen`, 10s) covers the drawer's device never
+  sending it (crashed, backgrounded, disconnected). Money effect
+  auto-applied as a `card` transaction. A card is exactly one of: a money
+  card, a **"go to
   X" move card** (`BoardCard.moveToPropertyId`, authored via a Money/Move
   to property/Move by spaces/Get out of jail free/Building repairs toggle)
   — drawing one
@@ -183,10 +215,15 @@ board — boards with different names/currencies/properties must all work.
   add cards in the editor.
 - **Landing auto-opens the property sheet**: on a board with a curated
   layout, whenever your own roll (or a "go to X" card) moves your token
-  onto a street/railroad/utility, that property's sheet pops open right
-  away — buy, pay rent, or manage buildings without digging through
-  Properties (`GameScreen._maybeOpenLandedProperty`, driven by
-  `GameProvider.diceRolls`/`cardDraws`).
+  onto a street/railroad/utility, that property's sheet pops open — buy,
+  pay rent, or manage buildings without digging through Properties
+  (`GameScreen._maybeOpenLandedProperty`, driven by
+  `GameProvider.diceRolls`/`cardDraws`). It doesn't chain in the instant
+  the board sheet appears — an earlier version chained straight off the
+  board *closing*, which read as a trap. Instead it waits 2s after the
+  board pops up, then opens on top of it, still open behind
+  (`_afterRollReveal`) — long enough to actually see the token land on the
+  board before the sheet appears over it.
 - **Pass GO**: salary, doubled if landed on exactly — automatic on boards
   with a curated layout; a manual quick action on boards without one.
 - **Not modeled on purpose**: bankruptcy, structured trade offers (property
@@ -263,7 +300,9 @@ settles a money request), `buyProperty` (optional price = auction bid),
 toId; resolves via propertyChanged's txId), `moneyRequest`, `moneyRequestResponse` (decline by target / withdraw by
 requester), `rollDice`, `drawCard`, `editTransactionNote`, `payJailFine`,
 `useJailCard` (resolves via jailCardUsed's txId, moves no money),
-`startAuction`, `placeBid`, `closeAuction`, `endTurn`, `leaveGame`.
+`startAuction`, `placeBid`, `closeAuction`, `endTurn`, `leaveGame`,
+`dismissRoll` (a drawer's device signals it's about to show its own copy
+of a just-drawn Chance/Community Chest card's dialog — see below).
 
 Events (server→client): `joinAccepted`/`joinRejected`, `snapshot`,
 `paymentApplied` (tx + full player list + freeParkingPot), `paymentRejected`,
@@ -277,7 +316,8 @@ since a "go to X"/jail card can move or grant a card to the drawer), `turnChange
 `playerJoined`, `playerLeft`, `presenceChanged`, `gameClosed`,
 `auctionStarted`/`auctionBid` (auction state), `auctionClosed`
 (propertyId + winnerId/amount, or cancelled + reason), `auctionRejected`
-(sent only to the sender — bid too low, can't afford it, etc).
+(sent only to the sender — bid too low, can't afford it, etc), `rollDismissed`
+(playerId — a pure relay of `dismissRoll`, see below).
 
 Intent ids (txId) make retries idempotent; pending intents resolve via
 completers in `GameProvider` with timeouts. `payJailFine` has no dedicated
@@ -375,16 +415,20 @@ unbound-playerId gate).
 
 Flat layout: `lib/screens`, `lib/widgets`, `lib/theme`, `lib/utils`.
 
-- `home_screen` → `games_tab` (games list; "Live" badge = actually connected
-  right now for whichever game this device is currently in, **or** — for
-  every other saved game — its last-known host answering a quick, bounded
-  TCP probe (`_probeReachability`, same idea `discovery_service` already
-  uses for mDNS-found rooms), run on load and on pull-to-refresh, so a game
-  hosted elsewhere shows live without having to be opened first; tapping
-  opens instantly and connects in background; "Watch a room's
-  dashboard" connects read-only as a spectator instead — see Spectator
-  mode — and lands on `dashboard_screen` without adding anything to this
-  list) + `boards_tab`
+- `home_screen` → `games_tab` (games list; "Live" badge = every saved game's
+  last-known host answering a quick, bounded TCP probe
+  (`_probeReachability`, same idea `discovery_service` already uses for
+  mDNS-found rooms), run on load, every 8s while this tab is on screen, and
+  on pull-to-refresh — including whichever game this device is currently
+  connected to: `GameClient` has no ping/heartbeat of its own, so
+  `ClientStatus` can keep reading "connected" for a while after a host
+  vanishes without a clean socket close (killed, network drop), and a
+  fresh `false` probe result overrides that stale belief rather than the
+  other way around. A game hosted elsewhere shows live without having to
+  be opened first; tapping opens instantly and connects in background;
+  "Watch a room's dashboard" connects read-only as a spectator instead —
+  see Spectator mode — and lands on `dashboard_screen` without adding
+  anything to this list) + `boards_tab`
   (editor, duplicate, clipboard copy/paste, file import/export via
   file_selector — desktop-only save dialog). No boards are bundled by
   default — hosting requires creating or importing at least one.
@@ -393,24 +437,28 @@ Flat layout: `lib/screens`, `lib/widgets`, `lib/theme`, `lib/utils`.
   pay the fine, or roll for doubles) when
   I'm in jail, roll/end-turn row (only on my turn), quick actions (Send,
   Request, Scan & pay, Receive, Pass GO, Collect, Chance, Chest —
-  Send/Scan/Collect/GO/Chance/Chest gated by `canResolve`,
-  Request/Receive never; **Pass GO is hidden once the board has a curated
+  Send/Collect/GO/Chance/Chest gated by `canResolve`,
+  Request/Receive/Scan & pay never (see turn flow above); **Pass GO is
+  hidden once the board has a curated
   layout**, since it pays automatically then), players row (balances under
   names, accent ring = current turn, long-press → send/request/payment
   card), properties summary, activity teaser (10) → `activity_screen`
   (full). On boards with a curated layout, an app-bar toggle
   (`widgets/ring_board.dart`-backed `BoardLayoutView` in a **modal**
-  `showModalBottomSheet`, `isDismissible: false` — blocks the rest of the
-  screen like any other sheet, closable only via its own close button, not
-  by tapping outside) shows/hides the board on demand, and it also **pops
-  up automatically on any roll** (`GameProvider.diceRolls` stream — every
-  device sees every roll, so token movement is visible wherever a player is
-  looking) if it isn't already open. It stays open until whoever's looking
-  at it closes it themselves — no timer, no auto-close on any device. For
-  my own roll, the popup order is dice result → board (waits for me to
-  close it) → landed property's sheet (`_afterRollReveal`, chained on
-  `_rollUiChain`), so the board actually gets seen instead of being
-  replaced immediately by the next popup. A card that doesn't move the
+  `showModalBottomSheet` — blocks the rest of the screen like any other
+  sheet, dismissible via its own close button, a drag, or tapping outside,
+  same as any normal sheet) shows/hides the board on demand, and it also
+  **pops up automatically on any roll** (`GameProvider.diceRolls` stream —
+  every device sees every roll, so token movement is visible wherever a
+  player is looking) if it isn't already open. It stays open until
+  whoever's looking at it closes it (however they choose to) — no timer,
+  no auto-close on any device. For
+  my own roll, the popup order is dice result → board (pops up and stays
+  open) → a 2s pause → landed property's sheet on top of it
+  (`_afterRollReveal`, chained on `_rollUiChain`), so the board actually
+  gets seen before the sheet appears over it, instead of the sheet
+  chaining in the instant the board is dismissed (an earlier version did
+  that, and it read as a trap). A card that doesn't move the
   drawer (money, jail, repairs) skips the property re-check — only a "go
   to X"/"go back N" card re-opens it, since only those actually change
   where the token is standing. Any running auction shows as an `AuctionCard` above the
@@ -448,7 +496,12 @@ Flat layout: `lib/screens`, `lib/widgets`, `lib/theme`, `lib/utils`.
   (earlier scroll/pinch-zoom versions were tried and explicitly rejected;
   don't reintroduce `InteractiveViewer` or scrollables here). Shared by
   `game_screen`'s board toggle/popup and embedded in `dashboard_screen`.
-  Token movement is instant, not animated (still deferred).
+  Every token carries its own continuous, radar-style pulsing ring
+  (`_TokenRadarPulse`, staggered per seat so tokens sharing a square don't
+  blip in lockstep) so where everyone currently stands reads at a glance,
+  like a radar sweep, not just right after they move. Token movement
+  itself is instant, not animated (still deferred) — only the pulse is
+  new.
 - `properties_screen` — search, ownership list (ownable kinds only —
   specials live in the board view, not here), per-property sheet (rent
   table, buy/pay-rent/build with **confirmation dialogs**, errors shown
@@ -495,7 +548,16 @@ Flat layout: `lib/screens`, `lib/widgets`, `lib/theme`, `lib/utils`.
   need only a name.
 - `scan_pay_screen` (mobile_scanner; `canScanQr` excludes Windows/Linux),
   `receive_money_sheet` (my QR, optional fixed amount, auto-closes when
-  paid), `web_join_screen`, `host/join` screens.
+  paid), `web_join_screen`, `host/join` screens. `join_game_screen` adds a
+  `scan_join_screen` entry point (a `qr_code_scanner_rounded` suffix icon
+  inside the address field, same `canScanQr` gate) for devices mDNS
+  doesn't reach — scans the same join link the room QR/"copy link" encode
+  and reuses `utils/join_address.dart`'s parser (also backing the manual
+  address field) rather than duplicating the host/port parsing.
+  `scan_pay_screen`/`scan_join_screen` share `widgets/qr_scan_view.dart` —
+  a `MobileScanner` restricted to a centered square `scanWindow` (so a
+  second QR elsewhere in frame is ignored) with a dimmed, bracketed
+  viewfinder overlay drawn around it.
 - Widgets: `balance_card` (trailing + footer slots), `transaction_tile` →
   `transaction_details_sheet`, `activity_feed.dart`
   (`buildActivityFeed(context, session, limit)` — day headers + running
@@ -527,10 +589,19 @@ Flat layout: `lib/screens`, `lib/widgets`, `lib/theme`, `lib/utils`.
   for direct feedback on an action the viewer themselves just took, though
   — it anchors to the page's own Scaffold, so it renders *behind* anything
   pushed on top (a modal sheet, a dialog). For ambient notices about
-  something someone *else* just did (a bank collection, a payment landing
-  in my account), `utils/top_banner.dart`'s `showTopBanner` inserts
-  straight into the root `Overlay` instead, so it stays visible regardless
-  of what else is open.
+  something someone *else* just did (a dice roll, a bank collection, rent
+  or a payment landing in my account, a join link copied from the room-info
+  sheet), `widgets/activity_banner.dart`'s `showActivityBanner` inserts
+  into the root `Overlay` instead, so it stays visible regardless of what
+  else is open — one persistent `OverlayEntry` (`_ActivityBannerHost`, kept
+  alive for the app's lifetime) hosts every banner ever shown from
+  anywhere, stacked in a `Column` so a burst of events (several roll/rent
+  notices firing close together) queues underneath rather than each one
+  landing at the same `top: 0` spot and silently covering whatever was
+  already there — capped at 3 stacked at once, oldest dropped first. Each
+  card mirrors `ActivityFeed`/`TransactionTile`'s own visual language (icon,
+  title, meta, colored amount) rather than a plain icon-and-text strip, and
+  dismisses on its own 5s timer or on tap.
 
 ## NFC (Android)
 
@@ -629,10 +700,12 @@ doesn't exist (would need bonsoir Info.plist keys + NFC entitlements).
 
 ## Roadmap / not yet implemented
 
-Animated token movement (today's board view updates positions instantly,
-no animation) and a geometrically accurate ring layout (today it's a
-reading-order wrapping grid) — both explicitly deferred as a "static
-first" step before polish. Structured trade offers (property+cash in one
+Animated token movement (today's board view updates positions instantly —
+no sliding/path animation, though every token now carries a continuous
+radar-style pulse, see `_TokenRadarPulse` in `board_layout_view.dart`) and a
+geometrically accurate ring layout (today it's a reading-order wrapping
+grid) — both explicitly deferred as a "static first" step before polish.
+Structured trade offers (property+cash in one
 accepted bundle — plain transfer + Send exists), bankruptcy flow, settings
 screen (profile, theme, per-game house-rule toggles — e.g. make the strict
 turn-gating optional, double-GO, or the Free Parking pot optional/off),

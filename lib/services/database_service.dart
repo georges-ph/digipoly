@@ -129,18 +129,33 @@ class DatabaseService {
 
   // ---------------------------------------------------------- Game records
 
-  Future<void> upsertGameRecord(GameRecord record) => _db.insert(
-        'games',
-        {
-          'id': record.game.id,
-          'json': jsonEncode(record.game.toJson()),
-          'role': record.role.name,
-          'my_player_id': record.myPlayerId,
-          'host_address': record.hostAddress,
-          'host_port': record.hostPort,
-          'last_played_at': record.lastPlayedAt.millisecondsSinceEpoch,
-        },
-        conflictAlgorithm: ConflictAlgorithm.replace,
+  // A plain `INSERT OR REPLACE` deletes the existing row on conflict, so any
+  // column not listed here — current_turn_id/last_roll/turn_rolled/
+  // free_parking_pot, all written separately via setTurnState — would get
+  // silently reset to its default. This game hasn't just started a fresh
+  // turn just because its GameRecord (role/address/last-played, etc.)
+  // changed, which happens far more often (every reconnect re-applies a
+  // snapshot) than an actual new turn — an UPSERT that only touches these
+  // columns leaves whatever turn state is already there alone.
+  Future<void> upsertGameRecord(GameRecord record) => _db.rawInsert(
+        'INSERT INTO games '
+        '(id, json, role, my_player_id, host_address, host_port, last_played_at) '
+        'VALUES (?, ?, ?, ?, ?, ?, ?) '
+        'ON CONFLICT(id) DO UPDATE SET '
+        'json = excluded.json, role = excluded.role, '
+        'my_player_id = excluded.my_player_id, '
+        'host_address = excluded.host_address, '
+        'host_port = excluded.host_port, '
+        'last_played_at = excluded.last_played_at',
+        [
+          record.game.id,
+          jsonEncode(record.game.toJson()),
+          record.role.name,
+          record.myPlayerId,
+          record.hostAddress,
+          record.hostPort,
+          record.lastPlayedAt.millisecondsSinceEpoch,
+        ],
       );
 
   Future<List<GameRecord>> getGameRecords() async {

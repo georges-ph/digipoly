@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:bonsoir/bonsoir.dart';
@@ -39,8 +40,7 @@ class DiscoveryService {
   /// ("Game (2)") when a stale registration with the same name lingers,
   /// which would list the same room twice.
   final Map<String, DiscoveredRoom> _rooms = {};
-  final _roomsController =
-      StreamController<List<DiscoveredRoom>>.broadcast();
+  final _roomsController = StreamController<List<DiscoveredRoom>>.broadcast();
 
   Stream<List<DiscoveredRoom>> get rooms => _roomsController.stream;
   List<DiscoveredRoom> get currentRooms => _rooms.values.toList();
@@ -90,14 +90,16 @@ class DiscoveryService {
         case BonsoirDiscoveryServiceResolvedEvent(:final service):
           final host = service.hostAddress;
           if (host == null) return;
-          _addIfReachable(DiscoveredRoom(
-            serviceName: service.name,
-            gameId: service.attributes['gameId'] ?? '',
-            gameName: service.attributes['gameName'] ?? service.name,
-            boardName: service.attributes['board'] ?? '',
-            host: host,
-            port: service.port,
-          ));
+          _addIfReachable(
+            DiscoveredRoom(
+              serviceName: service.name,
+              gameId: service.attributes['gameId'] ?? '',
+              gameName: service.attributes['gameName'] ?? service.name,
+              boardName: service.attributes['board'] ?? '',
+              host: host,
+              port: service.port,
+            ),
+          );
         case BonsoirDiscoveryServiceLostEvent(:final service):
           _rooms.removeWhere((_, room) => room.serviceName == service.name);
           _emit();
@@ -118,22 +120,36 @@ class DiscoveryService {
   }
 
   /// mDNS records outlive rooms — a force-closed host never unregisters,
-  /// and OS caches keep answering until the TTL runs out. Only rooms that
-  /// actually accept a TCP connection right now get listed.
+  /// and OS caches keep answering until the TTL runs out. Only rooms whose
+  /// game id is actually still being served at that host:port get listed —
+  /// a bare TCP connect isn't enough, since re-hosting a new game from the
+  /// same machine tries the same default port first, which would make a
+  /// stale mDNS record for an old, no-longer-running game look reachable
+  /// too the moment any room is up on that machine.
   Future<void> _addIfReachable(DiscoveredRoom room) async {
-    final key = room.gameId.isEmpty
-        ? '${room.host}:${room.port}'
-        : room.gameId;
+    final key = room.gameId.isEmpty ? '${room.host}:${room.port}' : room.gameId;
+    final client = HttpClient()..connectionTimeout = const Duration(seconds: 2);
     try {
-      final socket = await Socket.connect(
-        room.host,
-        room.port,
-        timeout: const Duration(seconds: 2),
+      final request = await client
+          .getUrl(Uri.http('${room.host}:${room.port}', '__digipoly_info'))
+          .timeout(const Duration(seconds: 2));
+      final response = await request.close().timeout(
+        const Duration(seconds: 2),
       );
-      socket.destroy();
+      final body = await response
+          .transform(utf8.decoder)
+          .join()
+          .timeout(const Duration(seconds: 2));
+      final json = jsonDecode(body) as Map<String, dynamic>;
+      if (room.gameId.isNotEmpty && json['gameId'] != room.gameId) {
+        if (_rooms.remove(key) != null) _emit();
+        return;
+      }
     } catch (_) {
       if (_rooms.remove(key) != null) _emit();
       return;
+    } finally {
+      client.close(force: true);
     }
     if (_discovery == null) return; // Discovery stopped while probing.
     _rooms[key] = room;
