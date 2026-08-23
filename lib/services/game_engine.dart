@@ -28,6 +28,7 @@ abstract final class GameEngine {
     List<Player> players,
     GameTransaction tx, {
     String? viewerId,
+    bool forced = false,
   }) {
     if (tx.amount <= 0) {
       return err('Amount must be greater than zero.');
@@ -43,15 +44,26 @@ abstract final class GameEngine {
       return null;
     }
 
-    // Balances are allowed to go negative: a payment that can't be fully
-    // covered still goes through rather than silently doing nothing (there's
-    // no bankruptcy flow to fall back to) — the payer just owes the
-    // difference until they mortgage or sell something to catch up.
     Player? from;
     if (tx.fromId != Player.bankId) {
       from = find(tx.fromId);
       if (from == null) return err('Unknown sender.');
       if (from.hasLeft) return err('${from.name} has left the game.');
+      // No payment goes through unless the payer can fully cover it — same
+      // as buying a property or building already required — *unless* it's
+      // [forced]: something the system charges automatically with no
+      // confirmation step for the payer to mortgage/sell first (landing on
+      // Tax, a Chance/Community Chest money card, the fine forced on a 3rd
+      // failed jail roll). Blocking those the same way as a voluntary Pay
+      // rent tap would either strand the game mid-turn or just silently
+      // skip the charge — there's no bankruptcy flow to fall back to, so a
+      // forced charge goes through regardless and the payer owes the
+      // difference until they mortgage or sell to catch up.
+      if (!forced && from.balance < tx.amount) {
+        return err(viewerId == from.id
+            ? 'You do not have enough money.'
+            : '${from.name} does not have enough money.');
+      }
     }
 
     Player? to;
@@ -152,7 +164,7 @@ abstract final class GameEngine {
       case PropertyKind.street:
         final tier = ownership.houses.clamp(0, tiers.length - 1);
         var rent = tiers[tier];
-        if (tier == 0 && _ownsWholeGroup(board, ownerships, property)) {
+        if (tier == 0 && ownsWholeGroup(board, ownerships, property)) {
           rent *= 2;
         }
         return ok(rent);
@@ -208,20 +220,20 @@ abstract final class GameEngine {
     required Board board,
     required Map<String, PropertyOwnership> ownerships,
     required String propertyId,
-    required String senderId,
+    required Player sender,
     required int targetHouses,
   }) {
     final property = _find(board, propertyId);
     if (property == null) return err('Unknown property.');
     final ownership = ownerships[propertyId];
-    if (ownership == null || ownership.ownerId != senderId) {
+    if (ownership == null || ownership.ownerId != sender.id) {
       return err('You do not own ${property.name}.');
     }
     if (property.kind != PropertyKind.street) {
       return err('Only streets can have houses.');
     }
     // Standard rule: building requires a monopoly on the color group.
-    if (!_ownsWholeGroup(board, ownerships, property)) {
+    if (!ownsWholeGroup(board, ownerships, property)) {
       return err('You need to own the whole color group to build.');
     }
     if (targetHouses < 0 || targetHouses > PropertyOwnership.hotel) {
@@ -231,6 +243,13 @@ abstract final class GameEngine {
     if (delta == 0) return err('Nothing to change.');
     if (property.housePrice <= 0) {
       return err('${property.name} has no house price defined.');
+    }
+    // Building is a voluntary spend, like buying a property or bidding in
+    // an auction — it stays blocked if you can't afford it, unlike rent/
+    // tax/card charges, which are forced on you and go through regardless
+    // of balance (see applyPayment).
+    if (delta > 0 && sender.balance < delta * property.housePrice) {
+      return err('Not enough money to build on ${property.name}.');
     }
     // Standard rule: no building while any street of the group is
     // mortgaged (selling back is always allowed).
@@ -404,7 +423,11 @@ abstract final class GameEngine {
     return null;
   }
 
-  static bool _ownsWholeGroup(
+  /// Whether whoever owns [property] owns every street of its color group —
+  /// the monopoly needed to build. Public so the property sheet can use it
+  /// too, to only show the Buildings section once it'd actually work rather
+  /// than showing controls that just error out.
+  static bool ownsWholeGroup(
     Board board,
     Map<String, PropertyOwnership> ownerships,
     Property property,

@@ -82,9 +82,24 @@ class DigipolyApp extends StatelessWidget {
     if (!kIsWeb) return const HomeScreen();
 
     final base = Uri.base;
-    final servedFromRoom = base.scheme == 'http' && base.host.isNotEmpty && base.host != 'localhost' && base.host != '127.0.0.1' && base.hasPort;
+    final claim = base.queryParameters['claim'];
+    // The localhost/127.0.0.1 exclusion tells apart "opened from inside a
+    // room" from `flutter run -d chrome`'s own dev server, which is also
+    // served from localhost with no room behind it. But a `claim` query
+    // param is a signal only a real replace link would ever carry — dev
+    // serving never produces one — so honor it regardless of host rather
+    // than silently dropping the claim when the room happens to be tested
+    // via the host machine's own loopback address.
+    final servedFromRoom = base.scheme == 'http' &&
+        base.host.isNotEmpty &&
+        base.hasPort &&
+        (claim != null || (base.host != 'localhost' && base.host != '127.0.0.1'));
     if (servedFromRoom) {
-      return WebJoinScreen(host: base.host, port: base.port);
+      return WebJoinScreen(
+        host: base.host,
+        port: base.port,
+        claimPlayerId: claim,
+      );
     }
     return const HomeScreen();
   }

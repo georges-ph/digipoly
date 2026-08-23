@@ -12,10 +12,20 @@ import 'home_screen.dart';
 /// scanning the host's QR code or opening its join link directly. Asks for a
 /// name and drops the player directly into the game, no menus.
 class WebJoinScreen extends StatefulWidget {
-  const WebJoinScreen({super.key, required this.host, required this.port});
+  const WebJoinScreen({
+    super.key,
+    required this.host,
+    required this.port,
+    this.claimPlayerId,
+  });
 
   final String host;
   final int port;
+
+  /// Set when this link is a host's "Replace this player" invite — join
+  /// taking over that existing seat's balance and properties instead of
+  /// becoming a new player.
+  final String? claimPlayerId;
 
   @override
   State<WebJoinScreen> createState() => _WebJoinScreenState();
@@ -53,9 +63,11 @@ class _WebJoinScreenState extends State<WebJoinScreen> {
 
     Result<void> result;
     try {
-      result = await context
-          .read<GameProvider>()
-          .joinRoom(host: widget.host, port: widget.port);
+      result = await context.read<GameProvider>().joinRoom(
+            host: widget.host,
+            port: widget.port,
+            claimPlayerId: widget.claimPlayerId,
+          );
     } catch (e) {
       if (!mounted) return;
       setState(() {

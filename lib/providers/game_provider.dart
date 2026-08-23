@@ -94,6 +94,7 @@ class GameProvider extends ChangeNotifier {
   MoneyRequest? _incomingRequest;
   ClientStatus _connection = ClientStatus.disconnected;
   bool _hostEnded = false;
+  bool _kicked = false;
   bool _closing = false;
   bool _disposed = false;
   Timer? _reconnectTimer;
@@ -110,6 +111,12 @@ class GameProvider extends ChangeNotifier {
   /// Where a fresh join is headed, so the record can be built once the
   /// server accepts us and sends the game.
   ({String host, int port})? _joinTarget;
+
+  /// Set for the duration of a claim join (see [joinRoom]) — the existing
+  /// player id this device is taking over, instead of its own identity.
+  /// Only needed to bridge the gap before [_record] exists; once it does,
+  /// `_record.myPlayerId` already carries the same value forward.
+  String? _claimPlayerId;
 
   final _errors = StreamController<String>.broadcast();
   final _cardDraws = StreamController<CardDrawEvent>.broadcast();
@@ -201,8 +208,17 @@ class GameProvider extends ChangeNotifier {
   Game? get game => _record?.game;
   ClientStatus get connection => _connection;
   bool get hostEnded => _hostEnded;
+
+  /// The host removed me from this game — same idea as [hostEnded], just
+  /// targeted at me specifically rather than the whole room closing.
+  bool get kicked => _kicked;
   bool get isHost => _record?.role == GameRole.host;
-  String get myPlayerId => _identity.playerId;
+
+  /// Normally this device's own permanent identity — but a claimed seat
+  /// (see [joinRoom]'s `claimPlayerId`) plays as someone else's existing
+  /// player id for this one game, so this game's record is the source of
+  /// truth once it exists.
+  String get myPlayerId => _record?.myPlayerId ?? _identity.playerId;
 
   /// Watching read-only — no seat, no balance, not part of the rotation.
   bool get isSpectating => _spectating;
@@ -446,12 +462,17 @@ class GameProvider extends ChangeNotifier {
   }
 
   /// Joins a room found via discovery or a manually typed address.
+  /// [claimPlayerId] takes over an existing (kicked/left) player's seat —
+  /// their balance and properties — instead of joining as a brand-new
+  /// player; see the host's "Replace this player" flow.
   Future<Result<void>> joinRoom({
     required String host,
     required int port,
+    String? claimPlayerId,
   }) async {
     await closeSession();
     _joinTarget = (host: host, port: port);
+    _claimPlayerId = claimPlayerId;
     return _connect(host, port);
   }
 
@@ -522,6 +543,7 @@ class GameProvider extends ChangeNotifier {
     bool spectator = false,
   }) async {
     _hostEnded = false;
+    _kicked = false;
     _closing = false;
     _spectating = spectator;
 
@@ -535,10 +557,13 @@ class GameProvider extends ChangeNotifier {
     _statusSub = client.statusChanges.listen(_onStatus);
     notifyListeners();
 
+    // A fresh claim join sends the seat being taken over; once the record
+    // exists (this connect is a reconnect), its own myPlayerId already
+    // carries whichever identity — own or claimed — this game plays as.
     final connected = await client.connect(
       host: host,
       port: port,
-      playerId: _identity.playerId,
+      playerId: _claimPlayerId ?? _record?.myPlayerId ?? _identity.playerId,
       playerName: _identity.displayName,
       spectator: spectator,
     );
@@ -566,6 +591,13 @@ class GameProvider extends ChangeNotifier {
     if (gameId != null) await _db.deleteGame(gameId);
   }
 
+  /// Host-only: removes another player, freeing their seat for someone
+  /// else to claim (see [joinRoom]'s `claimPlayerId`). Their balance and
+  /// properties stay exactly as they were — same as if they'd left
+  /// themselves. Fire-and-forget, like other host-side moderation would be;
+  /// the server enforces that only the host can do this.
+  void kickPlayer(String playerId) => _client?.sendKickPlayer(playerId);
+
   /// Tears the session down but keeps the game on this device so it can be
   /// resumed later.
   Future<void> closeSession() async {
@@ -592,12 +624,15 @@ class GameProvider extends ChangeNotifier {
     _incomingRequest = null;
     _connection = ClientStatus.disconnected;
     _joinTarget = null;
+    _claimPlayerId = null;
     _spectating = false;
     _pendingJoin = null;
     _pendingRoll = null;
     _pendingPayments.clear();
     _pendingRequests.clear();
     _closing = false;
+    _hostEnded = false;
+    _kicked = false;
     notifyListeners();
   }
 
@@ -1062,6 +1097,9 @@ class GameProvider extends ChangeNotifier {
       case MessageType.gameClosed:
         _hostEnded = true;
         notifyListeners();
+      case MessageType.kicked:
+        _kicked = true;
+        notifyListeners();
       case MessageType.auctionStarted:
         final json = message.payload['auction'] as Map<String, dynamic>?;
         if (json != null) {
@@ -1111,7 +1149,7 @@ class GameProvider extends ChangeNotifier {
       _record = GameRecord(
         game: snapshot.game,
         role: GameRole.client,
-        myPlayerId: _identity.playerId,
+        myPlayerId: _claimPlayerId ?? _identity.playerId,
         lastPlayedAt: DateTime.now(),
         hostAddress: target.host,
         hostPort: target.port,
@@ -1125,6 +1163,7 @@ class GameProvider extends ChangeNotifier {
       return;
     }
     _joinTarget = null;
+    _claimPlayerId = null;
 
     _players = snapshot.players;
     _transactions = snapshot.transactions;
@@ -1286,7 +1325,7 @@ class GameProvider extends ChangeNotifier {
   }
 
   void _scheduleReconnectIfResumable() {
-    if (_closing || _hostEnded) return;
+    if (_closing || _hostEnded || _kicked) return;
     final record = _record;
     if (record == null) return;
     final host = record.hostAddress;
@@ -1295,7 +1334,7 @@ class GameProvider extends ChangeNotifier {
 
     _reconnectTimer?.cancel();
     _reconnectTimer = Timer(const Duration(seconds: 4), () {
-      if (_closing || _hostEnded || _record == null) return;
+      if (_closing || _hostEnded || _kicked || _record == null) return;
       if (_connection != ClientStatus.disconnected) return;
       _connect(host, port, spectator: _spectating);
     });

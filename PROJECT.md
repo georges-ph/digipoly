@@ -64,8 +64,13 @@ board — boards with different names/currencies/properties must all work.
   balance-card turn chip, dice sheet and dashboard. **Doubles roll again**:
   a double leaves the turn un-rolled server-side, so the player gets (and,
   since ending requires a roll, must take) another throw — unless that
-  double's move sends them to jail, which cancels the bonus roll. No
-  three-doubles-to-jail rule (only landing on Go To Jail sends you there).
+  double's move sends them to jail, which cancels the bonus roll. **Three
+  doubles in a row** sends the player straight to jail instead — no move,
+  no GO salary, no landing effect on that 3rd roll, and the turn ends there
+  (`GameServer._consecutiveDoubles`, in-memory only, reset whenever the
+  turn changes — a host restart mid-streak loses the count, same tradeoff
+  as the in-memory-only auction state). Only meaningful on a board with a
+  curated layout (no position tracking, no rule, otherwise).
 - **Board layout & token positions (optional per board)**: `Property` gained
   non-ownable kinds — `go`, `jail`, `freeParking`, `goToJail`, `tax`, `chance`,
   `communityChest` — living in the *same* `Board.properties` list as
@@ -80,13 +85,21 @@ board — boards with different names/currencies/properties must all work.
   - Landing on Tax auto-charges the bank (`Property.price` reused as the
     tax amount) and feeds the **Free Parking pot**; landing on Free Parking
     pays the pot out and resets it to 0 (a house rule, not official
-    Monopoly, added because the user wanted it).
+    Monopoly, added because the user wanted it). **Only the two Tax
+    squares feed the pot** — a jail fine and a Chance/Community Chest money
+    penalty (including a building-repairs card) are paid straight to the
+    bank, same as official rules, and never touch the pot. This is a
+    deliberate, narrower scope than some versions of the house rule (which
+    often throw jail fines and card penalties in too) — matches how the
+    user has always actually played it.
   - Landing on Go To Jail teleports to `Board.jailIndex`, sets `inJail`.
   - Landing on Chance/Community Chest auto-draws a card (same server logic
     as the manual quick action, just triggered by the landing).
   - Buying, paying rent, and mortgaging stay fully manual/confirmed, as
     always — only the *detection* of what square you're on is new.
-- **Jail** (only reachable via a Go To Jail square): on your turn, use a held
+- **Jail** (only reachable via a Go To Jail square, or a "go to X" card
+  targeting either the Go To Jail or the plain Jail square — see below): on
+  your turn, use a held
   Get Out of Jail Free card (`Player.jailCards`, free — see Chance/Community
   Chest below), pay `Board.jailFine` anytime before rolling to leave
   immediately, or roll — doubles escape free and move that roll,
@@ -168,6 +181,22 @@ board — boards with different names/currencies/properties must all work.
   the requestId. Server rejects upfront if target can't afford it; auto-
   declines (notifying both sides) if the accepted payment fails; requester
   backing out **withdraws** the request. Both sides' UI auto-dismisses.
+- **Kick / Replace**: host-only moderation, from a player's long-press
+  sheet. Kicking marks them `hasLeft` — same effect as leaving voluntarily,
+  balance and properties frozen exactly as they were, no liquidation
+  (`_handleKickPlayer`/`_removePlayer`, shared with `leaveGame`'s own code
+  path; the kicked device gets a dedicated `kicked` event before its
+  connection closes, since unlike a self-leave it didn't already know).
+  Replacing shares a join link/QR tagged with the vacant seat's id
+  (`?claim=<playerId>`, `join_address.dart`); a new device joining with it
+  takes over that player's existing balance and properties (and updates
+  the display name) instead of becoming a new player — server-side this
+  needs no special handling at all, since a join with an existing,
+  `hasLeft` player id is already just how a normal rejoin works. Client-
+  side, playing as a claimed identity for one specific game (rather than
+  this device's own permanent one) is handled by `GameProvider.myPlayerId`
+  preferring the game's own `GameRecord.myPlayerId` over
+  `IdentityService.playerId`.
 - **Chance / Community Chest**: quick actions draw the next card off the
   board's deck **on the server** — a shuffled pile per deck, dealt in order
   and reshuffled from scratch only once it runs out, like a physical stack
@@ -190,7 +219,12 @@ board — boards with different names/currencies/properties must all work.
   — drawing one
   moves the drawer's token straight to that square (paying GO salary if
   passed/landed on, same as a normal roll) and resolves whatever is there
-  exactly like landing on it normally would — a **relative move card**
+  exactly like landing on it normally would — **except** a card targeting
+  the plain Jail square is treated the same as targeting the dedicated Go
+  To Jail square: it arrests the player (`inJail = true`) and never pays GO
+  salary even if passed, rather than the harmless "just visiting" a normal
+  dice landing on the plain Jail square gives — nobody authors a "go to
+  jail" card meaning a casual drop-by — a **relative move card**
   (`BoardCard.moveBySpaces`, e.g. the classic "Go Back 3 Spaces") — a
   signed step count applied directly (never normalized into a forward
   distance), so it never pays GO salary even if it happens to land exactly
@@ -236,18 +270,24 @@ board — boards with different names/currencies/properties must all work.
   gets a heads-up (a top banner) the moment someone else collects, since
   it's the one action any player can use to hand themselves an arbitrary
   amount and there's otherwise no gate on it.
-- **Balances can go negative**: `GameEngine.applyPayment` no longer rejects
-  a payment the payer can't fully cover — tax, rent, card charges and the
-  jail fine all go through regardless, since there's no bankruptcy flow to
-  fall back to and a payment that just silently fails could get the game
-  stuck (land on a tax you can't pay; a rent an owner asks for that you
-  can't pay next turn). The payer owes the difference until they mortgage
-  or sell something to catch up. Only applies to payments that pass
-  through `applyPayment` — buying a property, building, and auction bids
-  still have their own "can you afford it" checks and stay blocked, since
-  those are voluntary spends, not something forcing a payment on you.
-  Negative balances render as `-$X` (`formatMoney`) and show in red
-  wherever a balance is displayed.
+- **A voluntary payment is blocked unless the payer can fully cover it —
+  a forced one goes through regardless**: `GameEngine.applyPayment` takes a
+  `forced` flag. For a normal (non-`forced`) payment — Pay rent (including
+  the owner-side POS tap), buying a property, building, mortgaging, a
+  plain send, a voluntary jail-fine payment, an auction bid/settlement — it
+  rejects the payment outright if it would leave the payer short, since the
+  payer had a real chance to mortgage or sell *before* taking that action;
+  the rejection reason shows on the sender's own device (personalized:
+  "You do not have enough money" vs "‹name› does not have enough money",
+  based on whether `viewerId` is the payer). A `forced: true` payment —
+  landing on Tax, a Chance/Community Chest money card, the fine forced by
+  a 3rd failed jail roll — is auto-triggered with no confirmation step for
+  the payer to prepare first, so it always goes through and the payer just
+  owes the difference until they mortgage or sell to catch up (there's no
+  bankruptcy flow to fall back to, and skipping the charge outright would
+  either strand the game mid-turn or let it silently vanish). Negative
+  balances render as `-$X` (`formatMoney`) and show in red wherever a
+  balance is displayed — now only reachable via a `forced` payment.
 
 ## Money & data model (`lib/models/`)
 
@@ -302,7 +342,8 @@ requester), `rollDice`, `drawCard`, `editTransactionNote`, `payJailFine`,
 `useJailCard` (resolves via jailCardUsed's txId, moves no money),
 `startAuction`, `placeBid`, `closeAuction`, `endTurn`, `leaveGame`,
 `dismissRoll` (a drawer's device signals it's about to show its own copy
-of a just-drawn Chance/Community Chest card's dialog — see below).
+of a just-drawn Chance/Community Chest card's dialog — see below),
+`kickPlayer` (host-only; see Kick / Replace above).
 
 Events (server→client): `joinAccepted`/`joinRejected`, `snapshot`,
 `paymentApplied` (tx + full player list + freeParkingPot), `paymentRejected`,
@@ -317,7 +358,8 @@ since a "go to X"/jail card can move or grant a card to the drawer), `turnChange
 `auctionStarted`/`auctionBid` (auction state), `auctionClosed`
 (propertyId + winnerId/amount, or cancelled + reason), `auctionRejected`
 (sent only to the sender — bid too low, can't afford it, etc), `rollDismissed`
-(playerId — a pure relay of `dismissRoll`, see below).
+(playerId — a pure relay of `dismissRoll`, see below), `kicked` (sent only
+to the removed player, right before the server closes their connection).
 
 Intent ids (txId) make retries idempotent; pending intents resolve via
 completers in `GameProvider` with timeouts. `payJailFine` has no dedicated
@@ -442,7 +484,9 @@ Flat layout: `lib/screens`, `lib/widgets`, `lib/theme`, `lib/utils`.
   hidden once the board has a curated
   layout**, since it pays automatically then), players row (balances under
   names, accent ring = current turn, long-press → send/request/payment
-  card), properties summary, activity teaser (10) → `activity_screen`
+  card, plus — host viewing another player — remove/replace them (see
+  Kick / Replace above)), properties summary, activity teaser (10) →
+  `activity_screen`
   (full). On boards with a curated layout, an app-bar toggle
   (`widgets/ring_board.dart`-backed `BoardLayoutView` in a **modal**
   `showModalBottomSheet` — blocks the rest of the screen like any other
@@ -651,14 +695,17 @@ Flat layout: `lib/screens`, `lib/widgets`, `lib/theme`, `lib/utils`.
   it → Send prefilled.
 - Room QR (game app bar) encodes `http://<ip>:47912/`; the same link is
   what the room-info sheet copies, and the Join screen's manual field
-  accepts a pasted link as well as a bare IP.
+  accepts a pasted link as well as a bare IP. A host's "Replace this
+  player" link (see Kick / Replace above) is the same link plus
+  `?claim=<playerId>`.
   The server can serve the **web app itself**: `tool/bundle_web_app.ps1`
   builds web + zips into `assets/web/web_app.zip` (gitignored); server
   serves it via a shelf Cascade. Scanning the QR on any phone opens the
   game in the browser → `web_join_screen` asks a name → joins directly.
   `main.dart` detects this by checking whether the page's own origin
-  (`Uri.base`) is a plain-http LAN address rather than parsing any query
-  params.
+  (`Uri.base`) is a plain-http LAN address rather than parsing query
+  params for that — a `claim` param, if present, still rides along into
+  `WebJoinScreen`.
 - Web builds can't host (dart:io throws at runtime, guarded by kIsWeb) or
   use NFC/mDNS; sqlite works via the wasm worker files in `web/`.
 
@@ -712,4 +759,11 @@ turn-gating optional, double-GO, or the Free Parking pot optional/off),
 POS mode with PIN for cards, net-worth stats/charts from the transaction
 log, game-end summary, sounds/haptics, community board catalog
 (currently P2P: boards travel with games, clipboard text, .json files; no
-central server by design).
+central server by design). **Bank loans, with interest** — not an official
+Monopoly rule (the real game only has mortgaging, selling houses back, and
+trading to raise cash; short of that, you go bankrupt — no bankruptcy flow
+exists here either, see above) but a deliberate house-rule addition in the
+same spirit as the Free Parking pot, and one that leans into this app
+being modeled as a real banking app rather than just a digital version of
+the board game. Explicitly deferred: a separate feature, its own commit,
+only after the current round of bug fixes lands.

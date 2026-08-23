@@ -111,9 +111,9 @@ class _ActivityBannerLayerState extends State<_ActivityBannerLayer> {
               children: [
                 for (final entry in _entries)
                   Padding(
+                    key: ValueKey(entry.id),
                     padding: const EdgeInsets.only(bottom: 8),
                     child: _ActivityBannerCard(
-                      key: ValueKey(entry.id),
                       data: entry.data,
                       onDismissed: () => _remove(entry.id),
                     ),
@@ -129,7 +129,6 @@ class _ActivityBannerLayerState extends State<_ActivityBannerLayer> {
 
 class _ActivityBannerCard extends StatefulWidget {
   const _ActivityBannerCard({
-    required super.key,
     required this.data,
     required this.onDismissed,
   });

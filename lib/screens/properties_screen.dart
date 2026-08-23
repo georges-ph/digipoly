@@ -570,6 +570,13 @@ class _PropertySheetState extends State<_PropertySheet> {
   /// it to a live, table-held auction instead — the only way one starts
   /// (the server enforces both the turn and position check too).
   void _startAuction() {
+    // A failed "Buy" attempt (usually why you're declining in the first
+    // place — can't afford the list price) leaves its error showing here;
+    // the AuctionCard replaces Buy/Decline in the same sheet instance
+    // rather than reopening it, so that stale message would otherwise
+    // linger underneath it for the rest of the auction, even once you go
+    // on to actually win it at a bid you could afford.
+    setState(() => _error = null);
     context.read<GameProvider>().startAuction(widget.propertyId);
   }
 
@@ -757,6 +764,11 @@ class _PropertySheetState extends State<_PropertySheet> {
     final canAct = session.canAct;
     final canResolve = session.canResolve;
     final isStreet = property.kind == PropertyKind.street;
+    // Building needs the whole color group owned — show the section only
+    // once it'd actually work, rather than showing controls that just
+    // error out when you don't have the monopoly yet.
+    final ownsGroup =
+        isStreet && GameEngine.ownsWholeGroup(board, session.ownerships, property);
     // A plain buy is only for the square you're actually standing on — a
     // table-held auction (below) is the exception, since its winner needn't
     // be the one who landed here. Boards with no curated layout track no
@@ -1030,7 +1042,7 @@ class _PropertySheetState extends State<_PropertySheet> {
                     );
                   },
                 ),
-              ] else if (isStreet) ...[
+              ] else if (isStreet && ownsGroup) ...[
                 Text(
                   'Buildings',
                   style: textTheme.titleSmall?.copyWith(
@@ -1111,7 +1123,17 @@ class _PropertySheetState extends State<_PropertySheet> {
                     ),
                   ),
                 ),
-              ] else
+              ] else if (isStreet)
+                Center(
+                  child: Text(
+                    'Own every street in this color group to build here.',
+                    textAlign: TextAlign.center,
+                    style: textTheme.bodySmall?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                )
+              else
                 Center(
                   child: Text(
                     'You own this. Rent is collected via Pay rent on the '
@@ -1203,7 +1225,7 @@ class _PropertySheetState extends State<_PropertySheet> {
                   ),
                 ),
               ],
-              if (isMine && isStreet && !canAct) ...[
+              if (isMine && ownsGroup && !canAct) ...[
                 const SizedBox(height: 10),
                 Center(
                   child: Text(

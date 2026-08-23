@@ -174,7 +174,7 @@ void main() {
         board: b,
         ownerships: owned,
         propertyId: 's1',
-        senderId: 'a',
+        sender: player('a', 1000),
         targetHouses: 4,
       );
       expect(cost.requireValue, 100);
@@ -185,7 +185,7 @@ void main() {
         board: b,
         ownerships: owned,
         propertyId: 's1',
-        senderId: 'a',
+        sender: player('a', 1000),
         targetHouses: 0,
       );
       expect(cost.requireValue, -50);
@@ -196,7 +196,7 @@ void main() {
         board: b,
         ownerships: owned,
         propertyId: 's1',
-        senderId: 'intruder',
+        sender: player('intruder', 1000),
         targetHouses: 3,
       );
       expect(cost.isOk, isFalse);
@@ -216,7 +216,7 @@ void main() {
           board: twoStreetBoard,
           ownerships: partial,
           propertyId: 's1',
-          senderId: 'a',
+          sender: player('a', 1000),
           targetHouses: 1,
         ).isOk,
         isFalse,
@@ -231,11 +231,22 @@ void main() {
           board: twoStreetBoard,
           ownerships: full,
           propertyId: 's1',
-          senderId: 'a',
+          sender: player('a', 1000),
           targetHouses: 1,
         ).isOk,
         isTrue,
       );
+    });
+
+    test('rejects building without enough money', () {
+      final cost = GameEngine.validateHouses(
+        board: b,
+        ownerships: owned,
+        propertyId: 's1',
+        sender: player('a', 49),
+        targetHouses: 3,
+      );
+      expect(cost.isOk, isFalse);
     });
   });
 
@@ -256,7 +267,7 @@ void main() {
           board: b,
           ownerships: owned,
           propertyId: 's1',
-          senderId: 'a',
+          sender: player('a', 1000),
           targetHouses: 2,
         ).isOk,
         isFalse,
@@ -266,7 +277,7 @@ void main() {
           board: b,
           ownerships: owned,
           propertyId: 's2',
-          senderId: 'a',
+          sender: player('a', 1000),
           targetHouses: 1,
         ).isOk,
         isTrue,
@@ -285,7 +296,7 @@ void main() {
           board: b,
           ownerships: owned,
           propertyId: 's2',
-          senderId: 'a',
+          sender: player('a', 1000),
           targetHouses: 0,
         ).isOk,
         isFalse,
@@ -295,7 +306,7 @@ void main() {
           board: b,
           ownerships: owned,
           propertyId: 's1',
-          senderId: 'a',
+          sender: player('a', 1000),
           targetHouses: 1,
         ).isOk,
         isTrue,
@@ -313,7 +324,7 @@ void main() {
           board: b,
           ownerships: owned,
           propertyId: 's1',
-          senderId: 'a',
+          sender: player('a', 1000),
           targetHouses: 1,
         ).isOk,
         isFalse,

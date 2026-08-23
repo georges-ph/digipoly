@@ -1035,6 +1035,15 @@ class _CardSheetState extends State<_CardSheet> {
       : _CardEffect.money;
   late String? _moveTargetId = widget.initial?.moveToPropertyId;
 
+  /// The plain Jail square is excluded here: a "go to X" card meaning
+  /// "go to jail" should target the dedicated Go To Jail square instead —
+  /// it's the one that actually reads as an arrest rather than a harmless
+  /// visit, and the server treats them identically anyway (see
+  /// `_drawCardFor` in game_server.dart), so there's nothing a card could
+  /// legitimately want from targeting the plain Jail square directly.
+  List<Property> get _moveTargets =>
+      widget.properties.where((p) => p.kind != PropertyKind.jail).toList();
+
   @override
   void dispose() {
     _textController.dispose();
@@ -1203,21 +1212,20 @@ class _CardSheetState extends State<_CardSheet> {
                 ],
               )
             else if (_effect == _CardEffect.move)
-              if (widget.properties.isEmpty)
+              if (_moveTargets.isEmpty)
                 Text(
                   'Add some properties to the board first.',
                   style: textTheme.bodySmall,
                 )
               else
                 DropdownButtonFormField<String>(
-                  initialValue:
-                      widget.properties.any((p) => p.id == _moveTargetId)
+                  initialValue: _moveTargets.any((p) => p.id == _moveTargetId)
                       ? _moveTargetId
                       : null,
                   isExpanded: true,
                   decoration: const InputDecoration(labelText: 'Destination'),
                   items: [
-                    for (final property in widget.properties)
+                    for (final property in _moveTargets)
                       DropdownMenuItem(
                         value: property.id,
                         child: Text(property.name),

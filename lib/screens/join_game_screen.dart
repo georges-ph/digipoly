@@ -46,7 +46,13 @@ class _JoinGameScreenState extends State<JoinGameScreen> {
     super.dispose();
   }
 
-  Future<void> _join(String host, int port, String key, {String? gameId}) async {
+  Future<void> _join(
+    String host,
+    int port,
+    String key, {
+    String? gameId,
+    String? claimPlayerId,
+  }) async {
     if (_joiningKey != null) return;
     final session = context.read<GameProvider>();
 
@@ -70,7 +76,11 @@ class _JoinGameScreenState extends State<JoinGameScreen> {
     try {
       result = widget.spectator
           ? await session.watchRoom(host: host, port: port)
-          : await session.joinRoom(host: host, port: port);
+          : await session.joinRoom(
+              host: host,
+              port: port,
+              claimPlayerId: claimPlayerId,
+            );
     } catch (e) {
       if (!mounted) return;
       setState(() => _joiningKey = null);
@@ -104,7 +114,12 @@ class _JoinGameScreenState extends State<JoinGameScreen> {
           'the join link.');
       return;
     }
-    _join(address.host, address.port, 'manual');
+    _join(
+      address.host,
+      address.port,
+      'manual',
+      claimPlayerId: address.claimPlayerId,
+    );
   }
 
   String _emptyStateHint() {
@@ -118,11 +133,17 @@ class _JoinGameScreenState extends State<JoinGameScreen> {
   }
 
   Future<void> _scanQr() async {
-    final address = await Navigator.of(context).push<({String host, int port})>(
+    final address = await Navigator.of(context)
+        .push<({String host, int port, String? claimPlayerId})>(
       MaterialPageRoute(builder: (_) => const ScanJoinScreen()),
     );
     if (address == null || !mounted) return;
-    _join(address.host, address.port, 'scan');
+    _join(
+      address.host,
+      address.port,
+      'scan',
+      claimPlayerId: address.claimPlayerId,
+    );
   }
 
   @override

@@ -736,6 +736,30 @@ class _GameScreenState extends State<GameScreen> {
               ),
               onTap: () => Navigator.pop(sheetContext, 'card'),
             ),
+            // Host-only moderation — not turn-gated, doesn't touch money.
+            if (!isMe && session.isHost) ...[
+              if (player.hasLeft)
+                ListTile(
+                  leading: const Icon(Icons.person_add_alt_1_rounded),
+                  title: Text('Replace ${player.name}'),
+                  subtitle: const Text(
+                    'A new device takes over their balance and properties',
+                  ),
+                  onTap: () => Navigator.pop(sheetContext, 'replace'),
+                )
+              else
+                ListTile(
+                  leading: const Icon(
+                    Icons.person_remove_alt_1_rounded,
+                    color: AppColors.expense,
+                  ),
+                  title: Text(
+                    'Remove ${player.name} from the game',
+                    style: const TextStyle(color: AppColors.expense),
+                  ),
+                  onTap: () => Navigator.pop(sheetContext, 'kick'),
+                ),
+            ],
             const SizedBox(height: 8),
           ],
         ),
@@ -749,7 +773,142 @@ class _GameScreenState extends State<GameScreen> {
         _openSend(mode: SendMode.request, toId: player.id);
       case 'card':
         _showPlayerCard(player);
+      case 'kick':
+        _kickPlayer(player);
+      case 'replace':
+        _showReplaceSheet(player);
     }
+  }
+
+  /// Host-only: removes another player from the game. Their balance and
+  /// properties stay exactly as they were — same as if they'd left
+  /// themselves — until someone claims the now-open seat (see
+  /// [_showReplaceSheet]).
+  Future<void> _kickPlayer(Player player) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text('Remove ${player.name}?'),
+        content: Text(
+          '${player.name} is removed from the table. Their balance and '
+          'properties stay as they are — replace them from this menu '
+          'later to hand the seat to someone else.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: AppColors.expense,
+              minimumSize: const Size(0, 44),
+            ),
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Remove'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    context.read<GameProvider>().kickPlayer(player.id);
+  }
+
+  /// Host-only: shares a join link/QR tagged to [player]'s now-open seat —
+  /// a new device scanning or opening it takes over their balance and
+  /// properties instead of joining as a fresh player.
+  Future<void> _showReplaceSheet(Player player) async {
+    final session = context.read<GameProvider>();
+    final endpoint = session.isHost
+        ? await session.roomEndpoint()
+        : '${session.record?.hostAddress}:${session.record?.hostPort}';
+    if (!mounted) return;
+
+    showModalBottomSheet<void>(
+      context: context,
+      builder: (sheetContext) {
+        final textTheme = Theme.of(sheetContext).textTheme;
+        final scheme = Theme.of(sheetContext).colorScheme;
+        final claimUrl =
+            endpoint == null ? null : 'http://$endpoint/?claim=${player.id}';
+        return SafeArea(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Replace ${player.name}',
+                  style: textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Whoever scans this takes over ${player.name}\'s balance '
+                  'and properties — not a fresh seat.',
+                  style: textTheme.bodySmall?.copyWith(
+                    color: scheme.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                if (claimUrl != null) ...[
+                  Center(
+                    child: Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: QrImageView(
+                        data: claimUrl,
+                        size: 190,
+                        backgroundColor: Colors.white,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                ],
+                InkWell(
+                  onTap: claimUrl == null
+                      ? null
+                      : () {
+                          Clipboard.setData(ClipboardData(text: claimUrl));
+                          showActivityBanner(
+                            sheetContext,
+                            ActivityBannerData(
+                              icon: Icons.copy_rounded,
+                              tone: BannerTone.neutral,
+                              title: 'Replace link copied',
+                              meta: 'Send it to ${player.name}\'s '
+                                  'replacement',
+                            ),
+                          );
+                        },
+                  borderRadius: BorderRadius.circular(16),
+                  child: Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: scheme.surfaceContainerHigh,
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: Text(
+                      claimUrl ?? 'Address unavailable',
+                      textAlign: TextAlign.center,
+                      style: textTheme.bodySmall?.copyWith(
+                        color: scheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
   }
 
   void _rollDice() {
@@ -1139,6 +1298,7 @@ class _GameScreenState extends State<GameScreen> {
         trailing: _ConnectionChip(
           status: session.connection,
           hostEnded: session.hostEnded,
+          kicked: session.kicked,
         ),
         footer: turnPlayer == null
             ? null
@@ -1551,6 +1711,7 @@ class _BoardSheet extends StatelessWidget {
                 board: board,
                 players: session.players,
                 ownerships: session.ownerships,
+                freeParkingPot: session.freeParkingPot,
                 onTapProperty: (property) => showPropertySheet(
                   context,
                   propertyId: property.id,
@@ -1910,14 +2071,21 @@ class _IncomingRequestDialogState extends State<_IncomingRequestDialog> {
 }
 
 class _ConnectionChip extends StatelessWidget {
-  const _ConnectionChip({required this.status, required this.hostEnded});
+  const _ConnectionChip({
+    required this.status,
+    required this.hostEnded,
+    required this.kicked,
+  });
 
   final ClientStatus status;
   final bool hostEnded;
+  final bool kicked;
 
   @override
   Widget build(BuildContext context) {
-    final (label, color) = hostEnded
+    final (label, color) = kicked
+        ? ('Removed', Colors.white70)
+        : hostEnded
         ? ('Ended', Colors.white70)
         : switch (status) {
             ClientStatus.connected => ('Live', AppColors.income),

@@ -216,6 +216,12 @@ class GameClient {
 
   void sendLeave() => send(const WsMessage(MessageType.leaveGame));
 
+  /// Host-only: removes another player from the game — same effect as
+  /// that player leaving themselves (balance/properties stay exactly as
+  /// they were), just triggered by the host instead.
+  void sendKickPlayer(String playerId) =>
+      send(WsMessage(MessageType.kickPlayer, {'playerId': playerId}));
+
   /// Tells the table it's fine to reveal a Chance/Community Chest card this
   /// device just drew — sent right as its own copy of that card's dialog is
   /// about to show.

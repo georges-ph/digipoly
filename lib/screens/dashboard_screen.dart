@@ -139,6 +139,7 @@ class _DashboardBody extends StatelessWidget {
               board: game.board,
               players: session.players,
               ownerships: session.ownerships,
+              freeParkingPot: session.freeParkingPot,
               // No NFC concept on a dashboard (a TV, a spectator's device) —
               // the "register a card" icon inside the sheet just stays off.
               onTapProperty: (property) => showPropertySheet(

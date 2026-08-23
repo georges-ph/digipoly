@@ -29,6 +29,7 @@ enum MessageType {
   placeBid,
   closeAuction,
   dismissRoll,
+  kickPlayer,
 
   // Server -> client events.
   joinAccepted,
@@ -53,6 +54,7 @@ enum MessageType {
   auctionClosed,
   auctionRejected,
   rollDismissed,
+  kicked,
   unknown;
 
   static MessageType fromName(String name) => MessageType.values.firstWhere(

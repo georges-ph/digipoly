@@ -52,6 +52,12 @@ class GameServer {
   DiceRoll? _lastRoll;
   bool _turnRolled = false;
   int _freeParkingPot = 0;
+
+  /// How many doubles the current player has rolled in a row this turn —
+  /// three sends them straight to jail instead of moving/re-rolling. Reset
+  /// whenever the turn changes; not persisted (a host restart mid-streak
+  /// loses count, same as the in-memory-only auction state).
+  int _consecutiveDoubles = 0;
   final _random = Random();
 
   // Cards are drawn like a physical pile: shuffled once, dealt off the top,
@@ -318,6 +324,8 @@ class GameServer {
             _handleEndTurn(playerId, channel);
           case MessageType.leaveGame:
             _handleLeave(playerId);
+          case MessageType.kickPlayer:
+            _handleKickPlayer(playerId, message.payload);
           case MessageType.dismissRoll:
             _handleDismissRoll(playerId);
           default:
@@ -445,11 +453,13 @@ class GameServer {
     GameTransaction tx,
     void Function(String reason) reject, {
     String? viewerId,
+    bool forced = false,
   }) {
     final result = GameEngine.applyPayment(
       _players.values.toList(),
       tx,
       viewerId: viewerId,
+      forced: forced,
     );
     if (!result.isOk) {
       reject(result.error!);
@@ -1010,7 +1020,7 @@ class GameServer {
       board: _game!.board,
       ownerships: _ownerships,
       propertyId: propertyId,
-      senderId: senderId,
+      sender: _players[senderId]!,
       targetHouses: targetHouses,
     );
     if (!validated.isOk) {
@@ -1228,13 +1238,16 @@ class GameServer {
   /// Dice are rolled on the server — by the player whose turn it is, and
   /// everyone sees the same result. A double leaves the turn un-rolled:
   /// the player rolls again, and (since ending requires a roll) must do so
-  /// before ending the turn.
+  /// before ending the turn — except a 3rd straight double, which sends
+  /// them to jail instead of moving, and ends the turn there.
   ///
   /// On a board with a curated layout (`board.goIndex != -1`) the roll also
   /// moves the player's token and resolves whatever they land on — tax,
   /// Free Parking, Go To Jail, Chance/Community Chest all trigger
   /// automatically; buying/paying rent/mortgaging stay manual, as always.
-  /// A board with no layout behaves exactly as before this feature existed.
+  /// A board with no layout behaves exactly as before this feature existed
+  /// — no position tracking means the three-doubles rule can't apply there
+  /// either.
   void _handleRollDice(String senderId) {
     if (senderId != _currentTurnId || _turnRolled) return;
     final game = _game!;
@@ -1255,9 +1268,29 @@ class GameServer {
       _resolveJailTurn(player, roll);
       _turnRolled = true;
     } else {
-      _movePlayer(player, roll.total);
-      // Landing on Go To Jail cancels a doubles bonus roll.
-      _turnRolled = !roll.isDouble || _players[senderId]!.inJail;
+      _consecutiveDoubles = roll.isDouble ? _consecutiveDoubles + 1 : 0;
+      if (_consecutiveDoubles >= 3) {
+        // Three doubles in a row: straight to jail, not the usual move —
+        // no GO salary, no landing effect, even if the roll would otherwise
+        // have crossed or landed on a square worth something. Distinct from
+        // landing on the Go To Jail square, which does move you there.
+        _consecutiveDoubles = 0;
+        final jailIndex = board.jailIndex;
+        if (jailIndex >= 0) {
+          final jailed = player.copyWith(
+            position: jailIndex,
+            inJail: true,
+            jailTurns: 0,
+          );
+          _players[jailed.id] = jailed;
+          _db.upsertPlayers(game.id, [jailed]);
+        }
+        _turnRolled = true;
+      } else {
+        _movePlayer(player, roll.total);
+        // Landing on Go To Jail cancels a doubles bonus roll.
+        _turnRolled = !roll.isDouble || _players[senderId]!.inJail;
+      }
     }
 
     _db.setTurnState(
@@ -1354,6 +1387,9 @@ class GameServer {
             }),
           ),
           viewerId: player.id,
+          // Auto-charged the instant you land here, no confirmation step to
+          // mortgage/sell first — same reasoning as the forced jail fine.
+          forced: true,
         );
         if (applied) _freeParkingPot += amount;
       case PropertyKind.freeParking:
@@ -1421,7 +1457,9 @@ class GameServer {
           timestamp: DateTime.now(),
           note: 'Jail fine',
         );
-        final applied = _applyTransaction(
+        // Only the two Tax squares feed the Free Parking pot — a jail fine
+        // is paid straight to the bank, same as a card money penalty.
+        _applyTransaction(
           tx,
           (reason) => _sendTo(
             freed.id,
@@ -1431,8 +1469,12 @@ class GameServer {
             }),
           ),
           viewerId: freed.id,
+          // Forced by the 3rd failed roll, not a choice — same reasoning
+          // as landing on Tax. Without this, a player who can't cover the
+          // fine would get freed and moved for free instead of paying what
+          // they can and owing the rest.
+          forced: true,
         );
-        if (applied) _freeParkingPot += game.board.jailFine;
         _movePlayer(_players[freed.id]!, roll.total);
     }
   }
@@ -1455,6 +1497,8 @@ class GameServer {
     final game = _game!;
     // Clear the jail state first so the transaction's single broadcast
     // already carries the freed player, rather than a second broadcast.
+    // Paid straight to the bank — only the two Tax squares feed the Free
+    // Parking pot.
     _players[senderId] = player.copyWith(inJail: false, jailTurns: 0);
 
     final tx = GameTransaction(
@@ -1471,7 +1515,6 @@ class GameServer {
       _players[senderId] = player; // roll back — the fine wasn't paid
       return;
     }
-    _freeParkingPot += game.board.jailFine;
     _db.setTurnState(
       game.id,
       currentTurnId: _currentTurnId,
@@ -1577,13 +1620,27 @@ class GameServer {
         final total = (targetIndex - mover.position) % board.properties.length;
         // A "Go to Jail" card is a direct teleport, not a real trip around
         // the board — never collects GO even if the forward path crosses
-        // it, same as landing on the Go To Jail square itself.
+        // it, same as landing on the Go To Jail square itself. A card
+        // authored to target the plain Jail square directly means the same
+        // thing — unlike an ordinary dice-roll landing there ("just
+        // visiting"), nobody authors a card to casually drop a player at
+        // the jail without arresting them.
         final target = board.properties[targetIndex];
-        _movePlayer(
-          mover,
-          total,
-          paysGoSalary: target.kind != PropertyKind.goToJail,
-        );
+        final sendsToJail =
+            target.kind == PropertyKind.goToJail ||
+            target.kind == PropertyKind.jail;
+        _movePlayer(mover, total, paysGoSalary: !sendsToJail);
+        if (sendsToJail && target.kind != PropertyKind.goToJail) {
+          // _resolveLanding already arrests for goToJail; the plain Jail
+          // square has no auto-effect of its own (it must stay a no-op for
+          // an ordinary dice landing there), so arrest explicitly here.
+          final arrived = _players[playerId];
+          if (arrived != null) {
+            final arrested = arrived.copyWith(inJail: true, jailTurns: 0);
+            _players[arrested.id] = arrested;
+            _db.upsertPlayers(game.id, [arrested]);
+          }
+        }
       }
     } else if (moveBy != null && moveBy != 0 && board.goIndex >= 0) {
       // A relative move (e.g. "Go Back 3 Spaces") — passed straight through
@@ -1651,6 +1708,9 @@ class GameServer {
         }),
       ),
       viewerId: playerId,
+      // Auto-applied the instant the card is drawn, no confirmation step —
+      // same reasoning as Tax and the forced jail fine.
+      forced: true,
     );
   }
 
@@ -1675,6 +1735,7 @@ class GameServer {
       _currentTurnId,
     );
     _turnRolled = false;
+    _consecutiveDoubles = 0;
     _db.setTurnState(
       game.id,
       currentTurnId: _currentTurnId,
@@ -1689,7 +1750,32 @@ class GameServer {
     );
   }
 
-  void _handleLeave(String playerId) {
+  void _handleLeave(String playerId) => _removePlayer(playerId);
+
+  /// Host-only: removes another player from the game — the balance and
+  /// properties they leave behind stay exactly as they were, frozen under
+  /// their name, same as a self-initiated leave (no bankruptcy/liquidation
+  /// flow — see PROJECT.md). Unlike a self-leave, the removed device
+  /// doesn't already know this happened, so it gets a dedicated notice
+  /// before its connection is closed.
+  void _handleKickPlayer(String senderId, Map<String, dynamic> payload) {
+    final game = _game;
+    if (game == null || senderId != game.hostId) return;
+
+    final targetId = payload['playerId'] as String? ?? '';
+    if (targetId == senderId) return;
+    final target = _players[targetId];
+    if (target == null || target.hasLeft) return;
+
+    _sendTo(targetId, const WsMessage(MessageType.kicked));
+    _removePlayer(targetId);
+  }
+
+  /// Marks [playerId] as left — their balance and properties stay exactly
+  /// as they were, just excluded from the turn rotation and money-move
+  /// pickers from here on. Shared by a self-initiated leave and a
+  /// host-initiated kick, which differ only in who's notified.
+  void _removePlayer(String playerId) {
     final game = _game;
     final player = _players[playerId];
     if (game == null || player == null) return;

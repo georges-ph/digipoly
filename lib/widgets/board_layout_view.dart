@@ -6,6 +6,7 @@ import '../models/property.dart';
 import '../models/property_ownership.dart';
 import '../theme/app_theme.dart';
 import '../utils/board_ring.dart';
+import '../utils/formatting.dart';
 import 'player_avatar.dart';
 import 'ring_board.dart';
 
@@ -30,12 +31,18 @@ class BoardLayoutView extends StatelessWidget {
     required this.players,
     this.ownerships = const {},
     this.onTapProperty,
+    this.freeParkingPot = 0,
   });
 
   final Board board;
   final List<Player> players;
   final Map<String, PropertyOwnership> ownerships;
   final void Function(Property property)? onTapProperty;
+
+  /// Shown as a badge on the Free Parking square itself when > 0 — the pot
+  /// is otherwise invisible until it pays out, unlike a physical table
+  /// where the cash literally piles up on the square.
+  final int freeParkingPot;
 
   @override
   Widget build(BuildContext context) {
@@ -67,6 +74,9 @@ class BoardLayoutView extends StatelessWidget {
           ownership: ownership,
           owner: ownership != null ? playersById[ownership.ownerId] : null,
           edge: edge,
+          potText: square.kind == PropertyKind.freeParking && freeParkingPot > 0
+              ? formatMoney(freeParkingPot, board.currencySymbol)
+              : null,
           tokens: [
             for (final player in activePlayers)
               if (player.position == i) player,
@@ -89,6 +99,7 @@ class _SquareTile extends StatelessWidget {
     this.ownership,
     this.owner,
     this.onTap,
+    this.potText,
   });
 
   final Property square;
@@ -98,6 +109,9 @@ class _SquareTile extends StatelessWidget {
   final PropertyOwnership? ownership;
   final Player? owner;
   final VoidCallback? onTap;
+
+  /// Free Parking's current pot, pre-formatted — null everywhere else.
+  final String? potText;
 
   @override
   Widget build(BuildContext context) {
@@ -257,6 +271,20 @@ class _SquareTile extends StatelessWidget {
               ),
             ),
           ),
+          if (potText != null) ...[
+            const SizedBox(height: 2),
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(
+                potText!,
+                maxLines: 1,
+                style: textTheme.labelSmall?.copyWith(
+                  fontWeight: FontWeight.w800,
+                  color: AppColors.income,
+                ),
+              ),
+            ),
+          ],
           if (ownership != null && ownership.houses > 0) ...[
             const SizedBox(height: 2),
             if (ownership.houses >= PropertyOwnership.hotel)
