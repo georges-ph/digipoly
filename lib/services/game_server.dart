@@ -327,7 +327,7 @@ class GameServer {
           case MessageType.kickPlayer:
             _handleKickPlayer(playerId, message.payload);
           case MessageType.dismissRoll:
-            _handleDismissRoll(playerId);
+            _handleDismissRoll(playerId, message.payload);
           default:
             break;
         }
@@ -1318,8 +1318,19 @@ class GameServer {
   /// the card) inside the same call that produces the roll broadcast, so
   /// the card reaches every other device before the roller has necessarily
   /// even seen their own dice result yet.
-  void _handleDismissRoll(String senderId) {
-    _broadcast(WsMessage(MessageType.rollDismissed, {'playerId': senderId}));
+  void _handleDismissRoll(String senderId, Map<String, dynamic> payload) {
+    // Keyed by drawId, not just playerId: the same player can draw more
+    // than one card in a turn (a "go to X" card re-landing on Chance, say),
+    // and a bare playerId can't tell those dismiss signals apart — a
+    // receiving device waiting on the wrong one would either reveal the
+    // wrong draw or hang until the fallback timeout.
+    final drawId = payload['drawId'] as String? ?? '';
+    _broadcast(
+      WsMessage(MessageType.rollDismissed, {
+        'playerId': senderId,
+        'drawId': drawId,
+      }),
+    );
   }
 
   /// Advances [player]'s token by [total] squares, auto-pays salary if GO
@@ -1605,6 +1616,10 @@ class GameServer {
         : board.chanceCards;
     if (cards.isEmpty) return;
     final card = _drawFromDeck(deck, cards);
+    // Identifies this specific draw, not just who drew it — the same
+    // player can draw more than once in a turn, and the dismissRoll
+    // reveal-ordering handshake below needs to tell those apart.
+    final drawId = const Uuid().v4();
 
     // Move first so the broadcast below already carries the new position.
     // Only meaningful on a board with a curated layout — elsewhere there is
@@ -1678,6 +1693,7 @@ class GameServer {
     _broadcast(
       WsMessage(MessageType.cardDrawn, {
         'playerId': playerId,
+        'drawId': drawId,
         'deck': deck,
         'card': card.toJson(),
         'players': _players.values.map((p) => p.toJson()).toList(),

@@ -24,6 +24,10 @@ import '../services/identity_service.dart';
 
 typedef CardDrawEvent = ({
   String playerId,
+  // Identifies this specific draw, not just who drew it — the same player
+  // can draw more than once in a turn, so this is what the dismissRoll
+  // reveal-ordering handshake actually waits on (see dismissRoll below).
+  String drawId,
   String deck,
   BoardCard card,
   // The actual amount charged/paid for a "pay per building" repairs card
@@ -134,6 +138,16 @@ class GameProvider extends ChangeNotifier {
   final _otherTransactions =
       StreamController<OtherTransactionEvent>.broadcast();
   final _rollDismissals = StreamController<String>.broadcast();
+
+  /// Every drawId a `rollDismissed` broadcast has already arrived for.
+  /// `rollDismissals` alone isn't enough to wait on: it's a live stream, so
+  /// a listener that starts even slightly after the matching event already
+  /// fired would miss it entirely and stall on the fallback timeout (this
+  /// bit hard the first time — a spam-drawn burst of cards sends several
+  /// dismissRoll signals in quick succession, easily ahead of a receiving
+  /// device's queue getting around to listening for any one of them). This
+  /// set lets a would-be listener check "did this already happen?" first.
+  final Set<String> _dismissedDraws = {};
   String? _outgoingRequestId;
 
   // ------------------------------------------------------------- Getters
@@ -148,11 +162,18 @@ class GameProvider extends ChangeNotifier {
   /// pop up automatically wherever players are looking.
   Stream<DiceRoll> get diceRolls => _diceRolls.stream;
 
-  /// Fires with a player's id the moment *their own* device is about to
-  /// show its copy of a card it just drew — lets everyone else's reveal of
-  /// that same card wait for that instead of guessing how long it takes
-  /// someone to look at their own dice result first.
+  /// Fires with a draw's id the moment *the drawer's own* device is about
+  /// to show its copy of that card — lets everyone else's reveal of that
+  /// same draw wait for that instead of guessing how long it takes someone
+  /// to look at their own dice result first. Keyed by drawId rather than
+  /// playerId since the same player can draw more than once in a turn.
+  /// Check [wasDismissed] before waiting on this — see its own doc.
   Stream<String> get rollDismissals => _rollDismissals.stream;
+
+  /// Whether a `rollDismissed` signal for [drawId] has already arrived —
+  /// check this before waiting on [rollDismissals] for it, since the
+  /// stream itself won't replay an event that already fired.
+  bool wasDismissed(String drawId) => _dismissedDraws.contains(drawId);
 
   /// Every property handed from one player to another — the recipient's
   /// device uses this to pop up a "you were given X" notice.
@@ -618,6 +639,7 @@ class GameProvider extends ChangeNotifier {
     _transactions = [];
     _ownerships.clear();
     _auctions.clear();
+    _dismissedDraws.clear();
     _currentTurnId = null;
     _lastRoll = null;
     _turnRolled = false;
@@ -874,9 +896,11 @@ class GameProvider extends ChangeNotifier {
   /// just drew — sent right as my own copy of that card's dialog is about
   /// to show, whether that draw came from landing on a roll (by then queued
   /// behind my own dice sheet already closing) or a manual quick action
-  /// (nothing to queue behind, so effectively immediate). Fire-and-forget,
+  /// (nothing to queue behind, so effectively immediate). [drawId] ties
+  /// this signal to that specific draw — I can draw more than once in a
+  /// turn, and a bare playerId can't tell those apart. Fire-and-forget,
   /// like rollDice/drawCard: nothing is waiting on a reply.
-  void dismissRoll() => _client?.sendDismissRoll();
+  void dismissRoll(String drawId) => _client?.sendDismissRoll(drawId);
 
   /// Ends my turn; the server advances the rotation. Only allowed after
   /// rolling — a turn is roll, act, end.
@@ -1024,6 +1048,7 @@ class GameProvider extends ChangeNotifier {
         if (cardJson != null && drawerId != null) {
           _cardDraws.add((
             playerId: drawerId,
+            drawId: message.payload['drawId'] as String? ?? '',
             deck: message.payload['deck'] as String? ?? 'chance',
             card: BoardCard.fromJson(cardJson),
             chargedAmount: message.payload['chargedAmount'] as int?,
@@ -1131,8 +1156,14 @@ class GameProvider extends ChangeNotifier {
             message.payload['reason'] as String? ?? 'That bid was rejected.';
         _errors.add(reason);
       case MessageType.rollDismissed:
-        final playerId = message.payload['playerId'] as String?;
-        if (playerId != null) _rollDismissals.add(playerId);
+        final drawId = message.payload['drawId'] as String?;
+        if (drawId != null && drawId.isNotEmpty) {
+          // Recorded before the stream event fires, so a listener that
+          // checks wasDismissed() first — even one that hasn't started
+          // listening yet — can still find out this already happened.
+          _dismissedDraws.add(drawId);
+          _rollDismissals.add(drawId);
+        }
       default:
         break;
     }

@@ -224,8 +224,10 @@ class GameClient {
 
   /// Tells the table it's fine to reveal a Chance/Community Chest card this
   /// device just drew — sent right as its own copy of that card's dialog is
-  /// about to show.
-  void sendDismissRoll() => send(const WsMessage(MessageType.dismissRoll));
+  /// about to show. [drawId] identifies which draw, since the same player
+  /// can draw more than once in a turn.
+  void sendDismissRoll(String drawId) =>
+      send(WsMessage(MessageType.dismissRoll, {'drawId': drawId}));
 
   void _handleClosed(WebSocketChannel channel) {
     if (_channel != channel) return;

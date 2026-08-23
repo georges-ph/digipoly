@@ -341,8 +341,9 @@ toId; resolves via propertyChanged's txId), `moneyRequest`, `moneyRequestRespons
 requester), `rollDice`, `drawCard`, `editTransactionNote`, `payJailFine`,
 `useJailCard` (resolves via jailCardUsed's txId, moves no money),
 `startAuction`, `placeBid`, `closeAuction`, `endTurn`, `leaveGame`,
-`dismissRoll` (a drawer's device signals it's about to show its own copy
-of a just-drawn Chance/Community Chest card's dialog — see below),
+`dismissRoll` (drawId; a drawer's device signals it's about to show its
+own copy of a just-drawn Chance/Community Chest card's dialog — see
+below),
 `kickPlayer` (host-only; see Kick / Replace above).
 
 Events (server→client): `joinAccepted`/`joinRejected`, `snapshot`,
@@ -358,7 +359,13 @@ since a "go to X"/jail card can move or grant a card to the drawer), `turnChange
 `auctionStarted`/`auctionBid` (auction state), `auctionClosed`
 (propertyId + winnerId/amount, or cancelled + reason), `auctionRejected`
 (sent only to the sender — bid too low, can't afford it, etc), `rollDismissed`
-(playerId — a pure relay of `dismissRoll`, see below), `kicked` (sent only
+(playerId + drawId — a pure relay of `dismissRoll`; keyed by drawId, not
+just playerId, since the same player can draw more than once in a turn
+and a bare playerId can't tell those reveal signals apart — a receiving
+device also checks `GameProvider.wasDismissed(drawId)` before waiting on
+the live stream for it, since a signal that already arrived can't be
+replayed to a listener that starts even slightly late, which a spam-drawn
+burst makes easy to hit), `kicked` (sent only
 to the removed player, right before the server closes their connection).
 
 Intent ids (txId) make retries idempotent; pending intents resolve via

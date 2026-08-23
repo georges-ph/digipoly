@@ -136,11 +136,20 @@ class _GameScreenState extends State<GameScreen> {
         // here the sheet is already gone) or a manual Chance/Chest quick
         // action (nothing queued ahead of it, so it fires right away) — both
         // cases boil down to "the drawer's own dialog is about to show".
+        // Matched by drawId, not playerId: the same player can draw more
+        // than once in a turn, and a bare playerId can't tell those signals
+        // apart. wasDismissed() is checked first because the signal itself
+        // can easily have already arrived by the time this closure gets its
+        // turn in the queue (e.g. a spam-drawn burst fires several dismiss
+        // signals faster than the receiving device works through its
+        // backlog) — rollDismissals is a live stream, so listening for an
+        // event that already happened would otherwise just hang until the
+        // fallback timeout below, once per queued draw.
         if (isMine) {
-          _session?.dismissRoll();
-        } else {
+          _session?.dismissRoll(event.drawId);
+        } else if (_session?.wasDismissed(event.drawId) != true) {
           await _session?.rollDismissals
-              .firstWhere((id) => id == event.playerId)
+              .firstWhere((id) => id == event.drawId)
               .timeout(const Duration(seconds: 10), onTimeout: () => '');
         }
         if (!mounted) return;
