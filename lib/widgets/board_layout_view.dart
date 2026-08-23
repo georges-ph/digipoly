@@ -198,6 +198,7 @@ class _SquareTile extends StatelessWidget {
                               player: player,
                               size: 20,
                               showPresence: false,
+                              showJailCard: false,
                             ),
                           ),
                         ),

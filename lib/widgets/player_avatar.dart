@@ -12,12 +12,18 @@ class PlayerAvatar extends StatelessWidget {
     required this.player,
     this.size = 48,
     this.showPresence = true,
+    this.showJailCard = true,
     this.highlight = false,
   });
 
   final Player player;
   final double size;
   final bool showPresence;
+
+  /// Badges a held Get Out of Jail Free card — off for the tiny board
+  /// tokens, which are already busy with the radar pulse and too small for
+  /// a legible badge.
+  final bool showJailCard;
 
   /// Draws an accent ring — used to mark whose turn it is.
   final bool highlight;
@@ -54,32 +60,62 @@ class PlayerAvatar extends StatelessWidget {
       ),
     );
 
-    // The presence dot is positioned against the plain avatar circle, not
-    // the ring — it must sit on the avatar's own edge regardless of
-    // whether the ring is drawn this frame.
-    if (showPresence && !player.hasLeft) {
+    // The presence dot and jail-card badge are positioned against the
+    // plain avatar circle, not the ring — they must sit on the avatar's
+    // own edge regardless of whether the ring is drawn this frame.
+    final jailCardBadge = showJailCard && player.jailCards > 0;
+    if ((showPresence && !player.hasLeft) || jailCardBadge) {
       avatar = Stack(
         clipBehavior: Clip.none,
         children: [
           avatar,
-          Positioned(
-            right: 0,
-            bottom: 0,
-            child: Container(
-              width: size * 0.28,
-              height: size * 0.28,
-              decoration: BoxDecoration(
-                color: player.isOnline
-                    ? AppColors.income
-                    : Theme.of(context).colorScheme.outlineVariant,
-                shape: BoxShape.circle,
-                border: Border.all(
-                  color: Theme.of(context).scaffoldBackgroundColor,
-                  width: 2,
+          if (showPresence && !player.hasLeft)
+            Positioned(
+              right: 0,
+              bottom: 0,
+              child: Container(
+                width: size * 0.28,
+                height: size * 0.28,
+                decoration: BoxDecoration(
+                  color: player.isOnline
+                      ? AppColors.income
+                      : Theme.of(context).colorScheme.outlineVariant,
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: Theme.of(context).scaffoldBackgroundColor,
+                    width: 2,
+                  ),
                 ),
               ),
             ),
-          ),
+          // A held Get Out of Jail Free card, visible on the opposite
+          // corner from presence — trading one is still a manual, physical
+          // affair (not an in-app transfer), so this is purely a "who's
+          // holding one" cue the table can actually see, to know who to
+          // negotiate with.
+          if (jailCardBadge)
+            Positioned(
+              right: 0,
+              top: 0,
+              child: Container(
+                width: size * 0.32,
+                height: size * 0.32,
+                decoration: BoxDecoration(
+                  color: AppColors.jailCard,
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: Theme.of(context).scaffoldBackgroundColor,
+                    width: 2,
+                  ),
+                ),
+                alignment: Alignment.center,
+                child: Icon(
+                  Icons.confirmation_number_rounded,
+                  size: size * 0.2,
+                  color: Colors.black87,
+                ),
+              ),
+            ),
         ],
       );
     }

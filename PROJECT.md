@@ -264,7 +264,12 @@ board — boards with different names/currencies/properties must all work.
   transfer + Send covers trades manually), transferring/selling a held Get
   Out of Jail Free card between players (use it or keep it; handing it to
   someone else is still a physical/manual affair, like a property trade's
-  cash side) — all candidates for later.
+  cash side) — all candidates for later. A held card *is* visible though:
+  `PlayerAvatar` badges it (`Player.jailCards > 0`) wherever an avatar
+  shows identity, so the table can actually see who's holding one to
+  negotiate a trade for it — off only on the small board tokens
+  (`showJailCard: false`), already busy with the radar pulse and too tiny
+  for a legible badge.
 - The **bank** is account id `"bank"` with infinite money; anyone may
   trigger bank payouts (like trusting the physical banker) — every device
   gets a heads-up (a top banner) the moment someone else collects, since
@@ -614,6 +619,8 @@ Flat layout: `lib/screens`, `lib/widgets`, `lib/theme`, `lib/utils`.
   (`buildActivityFeed(context, session, limit)` — day headers + running
   balance, shared by game/dashboard/activity), `player_card_sheet` (debit-
   card styled, "Register a physical card"), `player_avatar` (presence dot,
+  a gold Get Out of Jail Free badge when `Player.jailCards > 0`
+  (`showJailCard`, on by default — off for the small board tokens), and a
   highlight ring; color is keyed by **seat**, not a hash of the player id
   — `AppColors.avatarColorForSeat` — so two players at the same table
   never collide on a color, unlike the old id-hash scheme; the 8-color

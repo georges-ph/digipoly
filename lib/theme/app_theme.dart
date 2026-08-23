@@ -22,6 +22,10 @@ abstract final class AppColors {
   static const income = Color(0xFF16C784);
   static const expense = Color(0xFFFF5C7A);
 
+  /// Badge color for a held Get Out of Jail Free card — same gold a
+  /// physical one is usually printed in.
+  static const jailCard = Color(0xFFFFC107);
+
   static const darkScaffold = Color(0xFF0B0D14);
   static const darkSurface = Color(0xFF151824);
   static const darkSurfaceAlt = Color(0xFF1D2130);
