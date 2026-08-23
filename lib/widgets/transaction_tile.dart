@@ -82,6 +82,18 @@ class TransactionTile extends StatelessWidget {
         if (outgoing) return 'Gave a Get Out of Jail Free card to $to';
         if (incoming) return 'Got a Get Out of Jail Free card from $from';
         return '$from gave a Get Out of Jail Free card to $to';
+      case TransactionType.loan:
+        // incoming only happens on the take side (bank → me), outgoing
+        // only on the repay side (me → bank) — fromId/toId never let both
+        // combine the other way.
+        if (incoming) return 'Borrowed from the bank';
+        if (outgoing) return 'Repaid loan';
+        return transaction.fromId == Player.bankId
+            ? '$to took out a loan'
+            : '$from repaid a loan';
+      case TransactionType.loanInterest:
+        if (incoming || outgoing) return 'Loan interest';
+        return '$from accrued loan interest';
       case TransactionType.payment:
       case TransactionType.request:
         if (incoming) return 'From $from';
@@ -101,6 +113,8 @@ class TransactionTile extends StatelessWidget {
     TransactionType.freeParking => Icons.local_parking_rounded,
     TransactionType.transfer => Icons.swap_horiz_rounded,
     TransactionType.jailCardTransfer => Icons.confirmation_number_rounded,
+    TransactionType.loan => Icons.account_balance_rounded,
+    TransactionType.loanInterest => Icons.trending_up_rounded,
     _ =>
       incoming
           ? Icons.south_west_rounded

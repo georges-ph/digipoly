@@ -122,6 +122,7 @@ class Board {
     required this.startingBalance,
     required this.salary,
     this.jailFine = 50,
+    this.loanInterestRate = 10,
     this.properties = const [],
     this.chanceCards = const [],
     this.communityChestCards = const [],
@@ -139,6 +140,13 @@ class Board {
 
   /// Cost to pay your way out of jail on your turn.
   final int jailFine;
+
+  /// Percent interest charged on a player's outstanding bank loan balance
+  /// each time they pass or land on GO (`GameServer._movePlayer`, same
+  /// gate as GO salary — only meaningful on a board with a curated layout,
+  /// since that's the only place "a lap" is tracked at all). 0 means
+  /// interest-free borrowing, not that loans are unavailable.
+  final int loanInterestRate;
 
   /// Every square on the board, in physical board order — ownable
   /// properties and special squares (GO, Jail, Tax, ...) alike. A board
@@ -163,6 +171,7 @@ class Board {
         'startingBalance': startingBalance,
         'salary': salary,
         'jailFine': jailFine,
+        'loanInterestRate': loanInterestRate,
         'properties': properties.map((p) => p.toJson()).toList(),
         'chanceCards': chanceCards.map((c) => c.toJson()).toList(),
         'communityChestCards':
@@ -176,6 +185,7 @@ class Board {
         startingBalance: json['startingBalance'] as int? ?? 1500,
         salary: json['salary'] as int? ?? 200,
         jailFine: json['jailFine'] as int? ?? 50,
+        loanInterestRate: json['loanInterestRate'] as int? ?? 10,
         properties: (json['properties'] as List<dynamic>? ?? const [])
             .map((e) => Property.fromJson(e as Map<String, dynamic>))
             .toList(),
@@ -194,6 +204,7 @@ class Board {
     int? startingBalance,
     int? salary,
     int? jailFine,
+    int? loanInterestRate,
     List<Property>? properties,
     List<BoardCard>? chanceCards,
     List<BoardCard>? communityChestCards,
@@ -205,6 +216,7 @@ class Board {
         startingBalance: startingBalance ?? this.startingBalance,
         salary: salary ?? this.salary,
         jailFine: jailFine ?? this.jailFine,
+        loanInterestRate: loanInterestRate ?? this.loanInterestRate,
         properties: properties ?? this.properties,
         chanceCards: chanceCards ?? this.chanceCards,
         communityChestCards: communityChestCards ?? this.communityChestCards,

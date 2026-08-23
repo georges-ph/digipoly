@@ -32,7 +32,18 @@ enum TransactionType {
   /// A held Get Out of Jail Free card handed to another player directly —
   /// same idea as [transfer], just for a card instead of a property. No
   /// [GameTransaction.propertyId]; logged at $0 for the same reason.
-  jailCardTransfer;
+  jailCardTransfer,
+
+  /// Borrowing from the bank (bank pays player) or repaying it (player
+  /// pays bank) — either direction uses this same type, told apart by
+  /// fromId/toId like every other transaction.
+  loan,
+
+  /// Interest accrued on an outstanding loan balance (see
+  /// `Board.loanInterestRate`) — no cash actually moves, this is a record
+  /// of the loan balance growing, not a real payment. fromId is the
+  /// borrower, toId the bank, same direction as [loan] repayment.
+  loanInterest;
 
   static TransactionType fromName(String name) =>
       TransactionType.values.firstWhere(

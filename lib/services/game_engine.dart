@@ -285,6 +285,17 @@ abstract final class GameEngine {
   static int mortgageLiftCost(Property property) =>
       property.mortgageValue + (property.mortgageValue + 9) ~/ 10;
 
+  /// Interest charged on an outstanding loan balance for one lap of GO —
+  /// [ratePercent] of [loanBalance], rounded up (same rounding as
+  /// [mortgageLiftCost]).
+  static int computeLoanInterest({
+    required int loanBalance,
+    required int ratePercent,
+  }) {
+    if (loanBalance <= 0 || ratePercent <= 0) return 0;
+    return (loanBalance * ratePercent + 99) ~/ 100;
+  }
+
   /// Validates mortgaging (or lifting the mortgage on) [propertyId] and
   /// returns the money movement: negative = the bank pays the owner the
   /// mortgage value, positive = the owner pays the bank value + interest.

@@ -316,6 +316,10 @@ class GameServer {
             _handleUseJailCard(playerId, channel, message.payload);
           case MessageType.transferJailCard:
             _handleTransferJailCard(playerId, channel, message.payload);
+          case MessageType.takeLoan:
+            _handleTakeLoan(playerId, channel, message.payload);
+          case MessageType.repayLoan:
+            _handleRepayLoan(playerId, channel, message.payload);
           case MessageType.startAuction:
             _handleStartAuction(playerId, message.payload);
           case MessageType.placeBid:
@@ -1109,6 +1113,98 @@ class GameServer {
     );
   }
 
+  /// Borrows [amount] from the bank — a real loan, not free money: it adds
+  /// to the player's outstanding loan balance and accrues interest every
+  /// lap of GO (`Board.loanInterestRate`, see `_accrueLoanInterest`). No
+  /// borrowing cap — same trust as any other bank payout (collecting
+  /// salary, Free Parking); the cost is the interest, not a limit.
+  void _handleTakeLoan(
+    String senderId,
+    WebSocketChannel channel,
+    Map<String, dynamic> payload,
+  ) {
+    final txId = payload['id'] as String?;
+    final reject = _prepareIntent(senderId, channel, txId);
+    if (reject == null) return;
+
+    final amount = payload['amount'] as int? ?? 0;
+    if (amount <= 0) {
+      reject('Amount must be greater than zero.');
+      return;
+    }
+
+    final player = _players[senderId]!;
+    // Set first so the transaction's single broadcast already carries the
+    // updated loan balance, same pattern used for the Free Parking pot and
+    // jail state elsewhere.
+    _players[senderId] = player.copyWith(
+      loanBalance: player.loanBalance + amount,
+    );
+
+    _applyTransaction(
+      GameTransaction(
+        id: txId!,
+        gameId: _game!.id,
+        fromId: Player.bankId,
+        toId: senderId,
+        amount: amount,
+        type: TransactionType.loan,
+        timestamp: DateTime.now(),
+      ),
+      reject,
+      viewerId: senderId,
+    ); // bank-funded; cannot fail
+  }
+
+  /// Repays up to [amount] off a player's outstanding loan balance — never
+  /// more than what's actually owed, so overpaying just clears it. A
+  /// voluntary payment like any other, so it's blocked if the payer can't
+  /// cover it (see [GameEngine.applyPayment]) — unlike interest, which is
+  /// forced.
+  void _handleRepayLoan(
+    String senderId,
+    WebSocketChannel channel,
+    Map<String, dynamic> payload,
+  ) {
+    final txId = payload['id'] as String?;
+    final reject = _prepareIntent(senderId, channel, txId);
+    if (reject == null) return;
+
+    final player = _players[senderId]!;
+    if (player.loanBalance <= 0) {
+      reject("You don't have a loan to repay.");
+      return;
+    }
+    final requested = payload['amount'] as int? ?? 0;
+    if (requested <= 0) {
+      reject('Amount must be greater than zero.');
+      return;
+    }
+    final amount =
+        requested > player.loanBalance ? player.loanBalance : requested;
+
+    _players[senderId] = player.copyWith(
+      loanBalance: player.loanBalance - amount,
+    );
+
+    final applied = _applyTransaction(
+      GameTransaction(
+        id: txId!,
+        gameId: _game!.id,
+        fromId: senderId,
+        toId: Player.bankId,
+        amount: amount,
+        type: TransactionType.loan,
+        timestamp: DateTime.now(),
+      ),
+      reject,
+      viewerId: senderId,
+    );
+    if (!applied) {
+      _players[senderId] = player; // roll back — the payment wasn't made
+    }
+  }
+
   /// Hands a property to another player — the property side of a trade;
   /// no money moves (the deal's cash is a normal payment). The broadcast
   /// carries the intent id so the sender's pending future resolves.
@@ -1367,8 +1463,55 @@ class GameServer {
       current = _players[current.id]!;
     }
 
+    // Same gate as GO salary — a lap of the board is a lap either way, and
+    // a "go to jail" teleport that technically wraps past index 0 no more
+    // owes interest than it owes salary.
+    if (paysGoSalary && advance.crossedGo) {
+      current = _accrueLoanInterest(current, board);
+    }
+
     _db.upsertPlayers(game.id, [current]);
     _resolveLanding(current, board.properties[advance.position]);
+  }
+
+  /// Adds one lap's interest to [player]'s outstanding loan balance (see
+  /// `Board.loanInterestRate`) — no cash moves, just the debt growing, so
+  /// this logs its own record rather than going through [_applyTransaction]
+  /// (same reasoning as [_handleTransferProperty]). Returns the updated
+  /// player so callers already holding a local reference stay in sync.
+  Player _accrueLoanInterest(Player player, Board board) {
+    final interest = GameEngine.computeLoanInterest(
+      loanBalance: player.loanBalance,
+      ratePercent: board.loanInterestRate,
+    );
+    if (interest <= 0) return player;
+
+    final updated = player.copyWith(
+      loanBalance: player.loanBalance + interest,
+    );
+    _players[updated.id] = updated;
+    _db.upsertPlayers(_game!.id, [updated]);
+
+    final tx = GameTransaction(
+      id: const Uuid().v4(),
+      gameId: _game!.id,
+      fromId: updated.id,
+      toId: Player.bankId,
+      amount: interest,
+      type: TransactionType.loanInterest,
+      timestamp: DateTime.now(),
+    );
+    _transactions.add(tx);
+    _db.insertTransactions(_game!.id, [tx]);
+
+    _broadcast(
+      WsMessage(MessageType.paymentApplied, {
+        'transaction': tx.toJson(),
+        'players': _players.values.map((p) => p.toJson()).toList(),
+        'freeParkingPot': _freeParkingPot,
+      }),
+    );
+    return updated;
   }
 
   /// Auto-effects for the square a token just landed on. Ownable squares

@@ -176,6 +176,38 @@ board — boards with different names/currencies/properties must all work.
   need the whole group building-free to mortgage and unmortgaged to build.
   Lifting costs value + 10% interest (`GameEngine.mortgageLiftCost`).
   Allowed the whole turn (`canResolve`, like other bank moves).
+- **Bank loans, with interest** — not an official Monopoly rule (the real
+  game only has mortgaging, selling houses back, and trading to raise
+  cash; short of that, you go bankrupt — no bankruptcy flow exists here
+  either) but a deliberate house-rule addition in the same spirit as the
+  Free Parking pot, leaning into this app being modeled as a real banking
+  app rather than just a digital version of the board game. One running
+  balance per player (`Player.loanBalance`), not discrete loans — borrowing
+  more just adds to it. `Board.loanInterestRate` (percent, board-editable
+  next to salary/jail fine, default 10) is charged on the *current*
+  outstanding balance every time the borrower passes or lands on GO — the
+  same gate GO salary already uses (`GameServer._movePlayer`), so a "go to
+  jail" teleport that technically wraps past index 0 owes no more interest
+  than it owes salary, and — like every other position-dependent rule
+  here — this only fires on a board with a curated layout; a board without
+  one still lets you borrow/repay, it just never accrues interest
+  automatically. Borrowing has no cap (self-serve like collecting salary or
+  Free Parking — the cost is the interest, not a limit); repaying is a
+  voluntary payment and blocked if you can't cover it, same as any other
+  voluntary spend, though you can never overpay past what's actually owed.
+  Both open from a dedicated **Loan** quick action (`widgets/loan_sheet.dart`
+  — current balance, interest rate, an `AmountKeypad`, Borrow/Repay). A
+  standing loan shows as a persistent banner under the balance card
+  regardless of turn (unlike the jail banner, which is turn-scoped) — it's
+  debt, not a one-off moment. Interest accrual moves no cash (only
+  `loanBalance` changes) so it logs its own record
+  (`TransactionType.loanInterest`) rather than going through
+  `applyPayment`, same reasoning as a property/jail-card transfer; taking
+  and repaying reuse the ordinary `paymentApplied`/`paymentRejected` events
+  (`TransactionType.loan`) since real cash does move on both sides. Both
+  auto-resolved events (interest accrual, like salary/tax) and manual ones
+  (taking/repaying, like mortgaging) get an activity banner for whoever
+  wasn't looking.
 - **Money requests**: requester → server → target sees an approval dialog
   anywhere in the app; accepting sends a normal validated payment carrying
   the requestId. Server rejects upfront if target can't afford it; auto-
@@ -311,7 +343,8 @@ All models are hand-written JSON (`toJson`/`fromJson`)
 `.error`, `.requireValue`.
 
 - `board.dart` — `Board` (currency, startingBalance, salary, jailFine,
-  properties, chanceCards/communityChestCards) + `BoardCard` (text, amount:
+  loanInterestRate, properties, chanceCards/communityChestCards) +
+  `BoardCard` (text, amount:
   + collect / − pay / 0 none; **or** `moveToPropertyId` — a "go to X" card;
   **or** `moveBySpaces` — a relative move, e.g. "Go Back 3 Spaces"; **or**
   `grantsJailCard`; **or** `perHouseCharge`/`perHotelCharge` — a building
@@ -327,7 +360,8 @@ All models are hand-written JSON (`toJson`/`fromJson`)
 - `player.dart` — id (device UUID), name, balance, seat (join order = turn
   order), isHost/isOnline/hasLeft, position (index into `Board.properties`),
   inJail, jailTurns (failed jail-escape attempts), jailCards (held Get Out
-  of Jail Free cards). `Player.bankId == 'bank'`.
+  of Jail Free cards), loanBalance (owed to the bank, principal + accrued
+  interest combined). `Player.bankId == 'bank'`.
 - `game.dart` — `Game` (board travels inside it), `GameRecord` (local role:
   host/client, host address, myPlayerId), `GameSnapshot` (+ freeParkingPot,
   + running `auctions`).
@@ -335,7 +369,10 @@ All models are hand-written JSON (`toJson`/`fromJson`)
   request, card, mortgage, tax, freeParking, transfer (a property handed
   over directly — always $0, logged purely as an activity-feed record),
   jailCardTransfer (same idea, for a held Get Out of Jail Free card
-  instead — no propertyId); optional propertyId; note.
+  instead — no propertyId), loan (borrowing from/repaying the bank — real
+  cash both ways), loanInterest (accrued loan interest — no cash moves,
+  a record only, same reasoning as transfer/jailCardTransfer); optional
+  propertyId; note.
 - `property_ownership.dart` — propertyId → ownerId + houses (5 = hotel) +
   mortgaged.
 - `property_auction.dart` — `PropertyAuction` (propertyId, startedBy,
@@ -355,7 +392,8 @@ toId; resolves via propertyChanged's txId), `moneyRequest`, `moneyRequestRespons
 requester), `rollDice`, `drawCard`, `editTransactionNote`, `payJailFine`,
 `useJailCard` (resolves via jailCardUsed's txId, moves no money),
 `transferJailCard` (toId; resolves via jailCardTransferred's txId, moves
-no money),
+no money), `takeLoan`/`repayLoan` (amount; each resolves via the ordinary
+paymentApplied/paymentRejected events, since real cash moves both ways),
 `startAuction`, `placeBid`, `closeAuction`, `endTurn`, `leaveGame`,
 `dismissRoll` (drawId; a drawer's device signals it's about to show its
 own copy of a just-drawn Chance/Community Chest card's dialog — see
@@ -430,11 +468,15 @@ unbound-playerId gate).
   advancePosition (modular-arithmetic move + GO crossing/landing, GO can
   sit anywhere in the layout), resolveJailRoll (doubles escape / stuck /
   forced-pay-on-3rd-attempt), computeBuildingRepairs (the "pay per house/
-  hotel" card's bill, from the drawer's ownerships). Unit-tested.
+  hotel" card's bill, from the drawer's ownerships), computeLoanInterest
+  (one lap's interest on an outstanding loan balance, same rounding as
+  mortgageLiftCost). Unit-tested.
 - `game_server.dart` — sockets + state + persistence + broadcast; also
   serves the bundled web app; dice + card draws happen here. `_handleRollDice`
   also moves the roller's token and resolves the landing square
-  (`_movePlayer`/`_resolveLanding`) on boards with a curated layout;
+  (`_movePlayer`/`_resolveLanding`) on boards with a curated layout, and
+  `_movePlayer` accrues loan interest (`_accrueLoanInterest`) on the same
+  GO-crossing gate as salary;
   `_resolveJailTurn`/`_handlePayJailFine`/`_handleUseJailCard` implement the
   jail rule; `_chanceDeck`/`_chestDeck` are each deck's shuffled draw pile,
   `_chanceCardsOut`/`_chestCardsOut` track jail cards currently held by a
@@ -468,8 +510,8 @@ unbound-playerId gate).
   spectator): state, all actions
   (sendPayment/collectSalary/buyProperty/payRent/setHouses/requestMoney/
   respondToIncomingRequest/rollDice/drawCard/editTransactionNote/
-  payJailFine/useJailCard/transferJailCard/startAuction/placeBid/
-  closeAuction/endTurn),
+  payJailFine/useJailCard/transferJailCard/takeLoan/repayLoan/startAuction/
+  placeBid/closeAuction/endTurn),
   `watchRoom`
   (spectator join), reconnect, LAN IP
   (`roomEndpoint` — network_info_plus with NetworkInterface fallback for
@@ -503,13 +545,15 @@ Flat layout: `lib/screens`, `lib/widgets`, `lib/theme`, `lib/utils`.
 - `game_screen` — the banking app: balance card (connection chip + turn pill
   with dice result), a jail banner (use a held Get Out of Jail Free card,
   pay the fine, or roll for doubles) when
-  I'm in jail, roll/end-turn row (only on my turn), quick actions (Send,
-  Request, Scan & pay, Receive, Pass GO, Collect, Chance, Chest —
-  Send/Collect/GO/Chance/Chest gated by `canResolve`,
+  I'm in jail, a standing-loan banner (regardless of turn — see Bank loans
+  above) when I owe the bank, roll/end-turn row (only on my turn), quick
+  actions (Send, Request, Scan & pay, Receive, Pass GO, Collect, Chance,
+  Chest, Loan — Send/Collect/GO/Chance/Chest/Loan gated by `canResolve`,
   Request/Receive/Scan & pay never (see turn flow above); **Pass GO is
   hidden once the board has a curated
   layout**, since it pays automatically then), players row (balances under
-  names, accent ring = current turn, long-press → send/request/payment
+  names, accent ring = current turn, a gold badge for a held Get Out of
+  Jail Free card, long-press → send/request/payment card/give a held jail
   card, plus — host viewing another player — remove/replace them (see
   Kick / Replace above)), properties summary, activity teaser (10) →
   `activity_screen`
@@ -642,7 +686,9 @@ Flat layout: `lib/screens`, `lib/widgets`, `lib/theme`, `lib/utils`.
   same color, aside from a deliberate sky-blue/navy-blue pair),
   `auction_card.dart` (one live auction: current bid,
   who's leading, bid box, close button — read-only for spectators),
-  `amount_keypad`, `section_header`, `empty_state`.
+  `loan_sheet.dart` (borrow/repay against the bank — balance, interest
+  rate, an `amount_keypad`), `amount_keypad`, `section_header`,
+  `empty_state`.
 - Theme (`app_theme.dart`): violet fintech accent #635BFF, hero gradient,
   radius 22, light+dark, **Inter**, bundled as a local asset
   (`assets/fonts/InterVariable.ttf`, `pubspec.yaml` `fonts:`) rather than
@@ -787,11 +833,4 @@ turn-gating optional, double-GO, or the Free Parking pot optional/off),
 POS mode with PIN for cards, net-worth stats/charts from the transaction
 log, game-end summary, sounds/haptics, community board catalog
 (currently P2P: boards travel with games, clipboard text, .json files; no
-central server by design). **Bank loans, with interest** — not an official
-Monopoly rule (the real game only has mortgaging, selling houses back, and
-trading to raise cash; short of that, you go bankrupt — no bankruptcy flow
-exists here either, see above) but a deliberate house-rule addition in the
-same spirit as the Free Parking pot, and one that leans into this app
-being modeled as a real banking app rather than just a digital version of
-the board game. Explicitly deferred: a separate feature, its own commit,
-only after the current round of bug fixes lands.
+central server by design).

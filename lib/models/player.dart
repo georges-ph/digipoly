@@ -13,6 +13,7 @@ class Player {
     this.inJail = false,
     this.jailTurns = 0,
     this.jailCards = 0,
+    this.loanBalance = 0,
   });
 
   /// Sentinel id for the bank. The bank has infinite money and is a valid
@@ -50,6 +51,11 @@ class Player {
   /// Chest, kept until used — see [GameEngine]/GameServer's jail handling).
   final int jailCards;
 
+  /// What's currently owed on a bank loan — principal plus whatever
+  /// interest has accrued so far (see `Board.loanInterestRate`). 0 means no
+  /// active loan.
+  final int loanBalance;
+
   Map<String, dynamic> toJson() => {
         'id': id,
         'name': name,
@@ -62,6 +68,7 @@ class Player {
         'inJail': inJail,
         'jailTurns': jailTurns,
         'jailCards': jailCards,
+        'loanBalance': loanBalance,
       };
 
   factory Player.fromJson(Map<String, dynamic> json) => Player(
@@ -76,6 +83,7 @@ class Player {
         inJail: json['inJail'] as bool? ?? false,
         jailTurns: json['jailTurns'] as int? ?? 0,
         jailCards: json['jailCards'] as int? ?? 0,
+        loanBalance: json['loanBalance'] as int? ?? 0,
       );
 
   Player copyWith({
@@ -89,6 +97,7 @@ class Player {
     bool? inJail,
     int? jailTurns,
     int? jailCards,
+    int? loanBalance,
   }) =>
       Player(
         id: id,
@@ -102,5 +111,6 @@ class Player {
         inJail: inJail ?? this.inJail,
         jailTurns: jailTurns ?? this.jailTurns,
         jailCards: jailCards ?? this.jailCards,
+        loanBalance: loanBalance ?? this.loanBalance,
       );
 }

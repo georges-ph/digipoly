@@ -951,6 +951,27 @@ class GameProvider extends ChangeNotifier {
     return _awaitVerdict(_client!.sendTransferJailCard(toId));
   }
 
+  /// Borrows [amount] from the bank — adds to my outstanding loan balance;
+  /// interest accrues every lap of GO from here on.
+  Future<Result<void>> takeLoan(int amount) {
+    if (amount <= 0) {
+      return Future.value(err('Amount must be greater than zero.'));
+    }
+    final offline = _requireConnection();
+    if (offline != null) return Future.value(offline);
+    return _awaitVerdict(_client!.sendTakeLoan(amount));
+  }
+
+  /// Repays up to [amount] off my outstanding loan balance.
+  Future<Result<void>> repayLoan(int amount) {
+    if (amount <= 0) {
+      return Future.value(err('Amount must be greater than zero.'));
+    }
+    final offline = _requireConnection();
+    if (offline != null) return Future.value(offline);
+    return _awaitVerdict(_client!.sendRepayLoan(amount));
+  }
+
   // ------------------------------------------------------- Incoming events
 
   void _onMessage(WsMessage message) {
@@ -1324,16 +1345,20 @@ class GameProvider extends ChangeNotifier {
           amount: tx.amount,
         ));
       } else if (tx.type == TransactionType.salary ||
-          tx.type == TransactionType.tax) {
+          tx.type == TransactionType.tax ||
+          tx.type == TransactionType.loanInterest) {
         // Auto-resolved by landing on a square mid-roll (or a "go to X"
         // card) — unlike a manual action, the player it happened to gets
         // no confirming dialog of their own, so they need this banner too,
-        // not just everyone else at the table.
+        // not just everyone else at the table. Interest accrual is the
+        // same story: nothing confirms it when it happens, it's just
+        // added on top of the loan balance while you're busy rolling.
         _otherTransactions.add((tx: tx));
       } else if (const {
         TransactionType.house,
         TransactionType.mortgage,
         TransactionType.freeParking,
+        TransactionType.loan,
       }.contains(tx.type)) {
         // Whichever side isn't the bank is who this actually happened to —
         // skip when that's me, since I already got direct feedback from

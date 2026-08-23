@@ -25,6 +25,7 @@ import '../widgets/activity_feed.dart';
 import '../widgets/auction_card.dart';
 import '../widgets/balance_card.dart';
 import '../widgets/board_layout_view.dart';
+import '../widgets/loan_sheet.dart';
 import '../widgets/player_avatar.dart';
 import '../widgets/quick_action_button.dart';
 import '../widgets/player_card_sheet.dart';
@@ -461,6 +462,16 @@ class _GameScreenState extends State<GameScreen> {
         TransactionType.freeParking => (
           Icons.local_parking_rounded,
           '${session.accountName(tx.toId)} collected Free Parking',
+        ),
+        TransactionType.loan => (
+          Icons.account_balance_rounded,
+          tx.fromId == Player.bankId
+              ? '${session.accountName(tx.toId)} took out a loan'
+              : '${session.accountName(tx.fromId)} repaid a loan',
+        ),
+        TransactionType.loanInterest => (
+          Icons.trending_up_rounded,
+          '${who(tx.fromId)} accrued loan interest',
         ),
         _ => (Icons.swap_horiz_rounded, 'A transaction happened'),
       };
@@ -1042,6 +1053,14 @@ class _GameScreenState extends State<GameScreen> {
     );
   }
 
+  void _openLoanSheet() {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => const LoanSheet(),
+    );
+  }
+
   Future<void> _payJailFine() async {
     final session = context.read<GameProvider>();
     final result = await session.payJailFine();
@@ -1415,6 +1434,39 @@ class _GameScreenState extends State<GameScreen> {
                 highlight: session.isMyTurn,
               ),
       ),
+      // Visible regardless of turn — a loan is standing debt, not
+      // something tied to a single moment like the jail banner below.
+      if ((session.me?.loanBalance ?? 0) > 0) ...[
+        const SizedBox(height: 10),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          decoration: BoxDecoration(
+            color: AppColors.expense.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(AppTheme.radius),
+          ),
+          child: Row(
+            children: [
+              const Icon(
+                Icons.account_balance_rounded,
+                size: 18,
+                color: AppColors.expense,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'You owe '
+                  '${formatMoney(session.me!.loanBalance, board.currencySymbol)} '
+                  'to the bank',
+                  style: textTheme.bodySmall?.copyWith(
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.expense,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
       // Auctions aren't turn-gated — anyone can be bidding at any time,
       // so they're visible to the whole table regardless of whose turn
       // it is.
@@ -1578,6 +1630,11 @@ class _GameScreenState extends State<GameScreen> {
             icon: Icons.inventory_2_outlined,
             label: 'Chest',
             onTap: canResolve ? () => _drawCard('chest') : null,
+          ),
+          QuickActionButton(
+            icon: Icons.account_balance_rounded,
+            label: 'Loan',
+            onTap: canResolve ? _openLoanSheet : null,
           ),
         ],
       ),

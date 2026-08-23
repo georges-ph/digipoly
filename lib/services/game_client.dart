@@ -206,6 +206,27 @@ class GameClient {
     return txId;
   }
 
+  /// Borrows [amount] from the bank — adds to the outstanding loan
+  /// balance, interest accrues every lap of GO.
+  String sendTakeLoan(int amount) {
+    final txId = const Uuid().v4();
+    send(WsMessage(MessageType.takeLoan, {
+      'id': txId,
+      'amount': amount,
+    }));
+    return txId;
+  }
+
+  /// Repays up to [amount] off the outstanding loan balance.
+  String sendRepayLoan(int amount) {
+    final txId = const Uuid().v4();
+    send(WsMessage(MessageType.repayLoan, {
+      'id': txId,
+      'amount': amount,
+    }));
+    return txId;
+  }
+
   /// Starts a live auction for an unowned property. Not turn-gated —
   /// auctions arise on other players' turns, same as the old bid-after-the-
   /// fact flow.

@@ -45,6 +45,9 @@ class _BoardEditorScreenState extends State<BoardEditorScreen> {
   late final _jailFineController = TextEditingController(
     text: '${_base.jailFine}',
   );
+  late final _loanInterestController = TextEditingController(
+    text: '${_base.loanInterestRate}',
+  );
 
   late final List<Property> _properties = List.of(_base.properties);
   late final List<BoardCard> _chanceCards = List.of(_base.chanceCards);
@@ -61,6 +64,7 @@ class _BoardEditorScreenState extends State<BoardEditorScreen> {
     _startingController.dispose();
     _salaryController.dispose();
     _jailFineController.dispose();
+    _loanInterestController.dispose();
     super.dispose();
   }
 
@@ -79,6 +83,8 @@ class _BoardEditorScreenState extends State<BoardEditorScreen> {
       startingBalance: int.tryParse(_startingController.text.trim()) ?? 1500,
       salary: int.tryParse(_salaryController.text.trim()) ?? 200,
       jailFine: int.tryParse(_jailFineController.text.trim()) ?? 50,
+      loanInterestRate:
+          int.tryParse(_loanInterestController.text.trim()) ?? 10,
       properties: _properties,
       chanceCards: _chanceCards,
       communityChestCards: _communityCards,
@@ -229,6 +235,15 @@ class _BoardEditorScreenState extends State<BoardEditorScreen> {
                       ),
                     ),
                   ],
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: _loanInterestController,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                  decoration: const InputDecoration(
+                    labelText: 'Loan interest rate (%, per lap of GO)',
+                  ),
                 ),
                 const SizedBox(height: 20),
                 SectionHeader(

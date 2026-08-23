@@ -26,6 +26,8 @@ enum MessageType {
   payJailFine,
   useJailCard,
   transferJailCard,
+  takeLoan,
+  repayLoan,
   startAuction,
   placeBid,
   closeAuction,
