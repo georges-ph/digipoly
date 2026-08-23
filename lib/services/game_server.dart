@@ -314,6 +314,8 @@ class GameServer {
             _handlePayJailFine(playerId, channel, message.payload);
           case MessageType.useJailCard:
             _handleUseJailCard(playerId, channel, message.payload);
+          case MessageType.transferJailCard:
+            _handleTransferJailCard(playerId, channel, message.payload);
           case MessageType.startAuction:
             _handleStartAuction(playerId, message.payload);
           case MessageType.placeBid:
@@ -1571,6 +1573,64 @@ class GameServer {
       WsMessage(MessageType.jailCardUsed, {
         'txId': txId,
         'player': freed.toJson(),
+      }),
+    );
+  }
+
+  /// Hands a held Get Out of Jail Free card to another player — a trade,
+  /// like handing over a property (`_handleTransferProperty`). Moves no
+  /// money, so resolves via its own event instead of `paymentApplied`.
+  /// Not turn-gated (trades happen at the table anytime), and doesn't
+  /// touch `_chanceCardsOut`/`_chestCardsOut` — the card is still held by
+  /// someone at the table either way, just not the sender anymore, so it
+  /// stays out of the reshuffle exactly as before.
+  void _handleTransferJailCard(
+    String senderId,
+    WebSocketChannel channel,
+    Map<String, dynamic> payload,
+  ) {
+    final txId = payload['id'] as String?;
+    final reject = _prepareIntent(senderId, channel, txId);
+    if (reject == null) return;
+
+    final toId = payload['toId'] as String? ?? '';
+    final sender = _players[senderId]!;
+    final validated = GameEngine.validateJailCardTransfer(
+      sender: sender,
+      target: _players[toId],
+    );
+    if (!validated.isOk) {
+      reject(validated.error!);
+      return;
+    }
+
+    final fromPlayer = sender.copyWith(jailCards: sender.jailCards - 1);
+    final target = validated.requireValue;
+    final toPlayer = target.copyWith(jailCards: target.jailCards + 1);
+    _players[senderId] = fromPlayer;
+    _players[toId] = toPlayer;
+    _db.upsertPlayers(_game!.id, [fromPlayer, toPlayer]);
+
+    // No money moves, but the trade itself is worth a line in the activity
+    // feed — logged at $0, same as a property transfer.
+    final tx = GameTransaction(
+      id: const Uuid().v4(),
+      gameId: _game!.id,
+      fromId: senderId,
+      toId: toId,
+      amount: 0,
+      type: TransactionType.jailCardTransfer,
+      timestamp: DateTime.now(),
+    );
+    _transactions.add(tx);
+    _db.insertTransactions(_game!.id, [tx]);
+
+    _broadcast(
+      WsMessage(MessageType.jailCardTransferred, {
+        'txId': txId,
+        'fromPlayer': fromPlayer.toJson(),
+        'toPlayer': toPlayer.toJson(),
+        'transaction': tx.toJson(),
       }),
     );
   }

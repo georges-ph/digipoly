@@ -368,6 +368,26 @@ abstract final class GameEngine {
     return ok(target);
   }
 
+  /// Validates handing a held Get Out of Jail Free card over to [target] —
+  /// same idea as [validateTransfer], just for a card instead of a
+  /// property: no money moves, no turn gate (trades happen at the table
+  /// anytime), just ownership of the card itself.
+  static Result<Player> validateJailCardTransfer({
+    required Player sender,
+    required Player? target,
+  }) {
+    if (sender.jailCards <= 0) {
+      return err("You don't have a Get Out of Jail Free card.");
+    }
+    if (target == null || target.hasLeft) {
+      return err('That player is not in this game.');
+    }
+    if (target.id == sender.id) {
+      return err('You already have this card.');
+    }
+    return ok(target);
+  }
+
   /// Moves a token [total] squares forward around a board of [squareCount]
   /// squares. [goIndex] is `board.goIndex` (-1 if the board has no curated
   /// layout, in which case nothing ever "crosses GO"). `crossedGo` is true

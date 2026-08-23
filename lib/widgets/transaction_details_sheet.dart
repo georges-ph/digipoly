@@ -49,6 +49,7 @@ class TransactionDetailsSheet extends StatelessWidget {
     TransactionType.tax => 'Tax',
     TransactionType.freeParking => 'Free Parking',
     TransactionType.transfer => 'Property transfer',
+    TransactionType.jailCardTransfer => 'Get Out of Jail Free card transfer',
   };
 
   Future<void> _editNote(BuildContext context) async {

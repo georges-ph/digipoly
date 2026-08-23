@@ -52,6 +52,7 @@ class _GameScreenState extends State<GameScreen> {
   StreamSubscription<CardDrawEvent>? _cardDrawSub;
   StreamSubscription<DiceRoll>? _diceRollSub;
   StreamSubscription<PropertyTransferEvent>? _transferSub;
+  StreamSubscription<JailCardTransferEvent>? _jailCardTransferSub;
   StreamSubscription<BankCollectionEvent>? _bankCollectionSub;
   StreamSubscription<BankCollectionEvent>? _bankPaymentSub;
   StreamSubscription<PaymentReceivedEvent>? _paymentReceivedSub;
@@ -240,6 +241,44 @@ class _GameScreenState extends State<GameScreen> {
           content: Text(
             '${session.accountName(event.fromId)} gave you '
             '${property?.name ?? 'a property'}.',
+          ),
+          actions: [
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      );
+    });
+    // Same idea as propertyTransfers, just for a held jail card instead of
+    // a property — a trade, not a landing/buy, so it needs its own
+    // heads-up too.
+    _jailCardTransferSub = session.jailCardTransfers.listen((event) {
+      if (!mounted) return;
+      final session = _session;
+      if (session == null) return;
+      if (event.toId != session.myPlayerId &&
+          event.fromId != session.myPlayerId) {
+        showActivityBanner(
+          context,
+          ActivityBannerData(
+            icon: Icons.confirmation_number_rounded,
+            tone: BannerTone.neutral,
+            title:
+                '${session.accountName(event.fromId)} gave a Get Out of '
+                'Jail Free card to ${session.accountName(event.toId)}',
+          ),
+        );
+      }
+      if (event.toId != session.myPlayerId) return;
+      showDialog<void>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Get Out of Jail Free card received'),
+          content: Text(
+            '${session.accountName(event.fromId)} gave you a Get Out of '
+            'Jail Free card.',
           ),
           actions: [
             FilledButton(
@@ -456,6 +495,7 @@ class _GameScreenState extends State<GameScreen> {
     _cardDrawSub?.cancel();
     _diceRollSub?.cancel();
     _transferSub?.cancel();
+    _jailCardTransferSub?.cancel();
     _bankCollectionSub?.cancel();
     _bankPaymentSub?.cancel();
     _paymentReceivedSub?.cancel();
@@ -710,67 +750,88 @@ class _GameScreenState extends State<GameScreen> {
 
     final action = await showModalBottomSheet<String>(
       context: context,
+      // Content-sized by default, capped to a fraction of the screen with
+      // no scrolling — fine for the short menu this used to be, but the
+      // jail-card option below can push a short window (the host's own,
+      // not full-screen) past that cap and overflow. isScrollControlled
+      // lets the sheet grow to the full height and the scroll view inside
+      // takes it from there.
+      isScrollControlled: true,
       builder: (sheetContext) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const SizedBox(height: 8),
-            ListTile(
-              leading: PlayerAvatar(player: player, size: 40),
-              title: Text(
-                isMe ? 'You' : player.name,
-                style: const TextStyle(fontWeight: FontWeight.w800),
-              ),
-            ),
-            const Divider(height: 1),
-            if (!isMe) ...[
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(height: 8),
               ListTile(
-                enabled: connected && !player.hasLeft,
-                leading: const Icon(Icons.send_rounded),
-                title: Text('Send money to ${player.name}'),
-                onTap: () => Navigator.pop(sheetContext, 'send'),
-              ),
-              ListTile(
-                enabled: connected && !player.hasLeft,
-                leading: const Icon(Icons.currency_exchange_rounded),
-                title: Text('Request money from ${player.name}'),
-                onTap: () => Navigator.pop(sheetContext, 'request'),
-              ),
-            ],
-            ListTile(
-              leading: const Icon(Icons.credit_card_rounded),
-              title: const Text('Payment card'),
-              subtitle: const Text(
-                'View the card or register a physical NFC card',
-              ),
-              onTap: () => Navigator.pop(sheetContext, 'card'),
-            ),
-            // Host-only moderation — not turn-gated, doesn't touch money.
-            if (!isMe && session.isHost) ...[
-              if (player.hasLeft)
-                ListTile(
-                  leading: const Icon(Icons.person_add_alt_1_rounded),
-                  title: Text('Replace ${player.name}'),
-                  subtitle: const Text(
-                    'A new device takes over their balance and properties',
-                  ),
-                  onTap: () => Navigator.pop(sheetContext, 'replace'),
-                )
-              else
-                ListTile(
-                  leading: const Icon(
-                    Icons.person_remove_alt_1_rounded,
-                    color: AppColors.expense,
-                  ),
-                  title: Text(
-                    'Remove ${player.name} from the game',
-                    style: const TextStyle(color: AppColors.expense),
-                  ),
-                  onTap: () => Navigator.pop(sheetContext, 'kick'),
+                leading: PlayerAvatar(player: player, size: 40),
+                title: Text(
+                  isMe ? 'You' : player.name,
+                  style: const TextStyle(fontWeight: FontWeight.w800),
                 ),
+              ),
+              const Divider(height: 1),
+              if (!isMe) ...[
+                ListTile(
+                  enabled: connected && !player.hasLeft,
+                  leading: const Icon(Icons.send_rounded),
+                  title: Text('Send money to ${player.name}'),
+                  onTap: () => Navigator.pop(sheetContext, 'send'),
+                ),
+                ListTile(
+                  enabled: connected && !player.hasLeft,
+                  leading: const Icon(Icons.currency_exchange_rounded),
+                  title: Text('Request money from ${player.name}'),
+                  onTap: () => Navigator.pop(sheetContext, 'request'),
+                ),
+                // A trade, like handing over a property — not turn-gated,
+                // only shown when I actually hold one to give.
+                if ((session.me?.jailCards ?? 0) > 0)
+                  ListTile(
+                    enabled: connected && !player.hasLeft,
+                    leading: const Icon(Icons.confirmation_number_rounded),
+                    title: Text(
+                      'Give your Get Out of Jail Free card to '
+                      '${player.name}',
+                    ),
+                    onTap: () => Navigator.pop(sheetContext, 'giveJailCard'),
+                  ),
+              ],
+              ListTile(
+                leading: const Icon(Icons.credit_card_rounded),
+                title: const Text('Payment card'),
+                subtitle: const Text(
+                  'View the card or register a physical NFC card',
+                ),
+                onTap: () => Navigator.pop(sheetContext, 'card'),
+              ),
+              // Host-only moderation — not turn-gated, doesn't touch money.
+              if (!isMe && session.isHost) ...[
+                if (player.hasLeft)
+                  ListTile(
+                    leading: const Icon(Icons.person_add_alt_1_rounded),
+                    title: Text('Replace ${player.name}'),
+                    subtitle: const Text(
+                      'A new device takes over their balance and properties',
+                    ),
+                    onTap: () => Navigator.pop(sheetContext, 'replace'),
+                  )
+                else
+                  ListTile(
+                    leading: const Icon(
+                      Icons.person_remove_alt_1_rounded,
+                      color: AppColors.expense,
+                    ),
+                    title: Text(
+                      'Remove ${player.name} from the game',
+                      style: const TextStyle(color: AppColors.expense),
+                    ),
+                    onTap: () => Navigator.pop(sheetContext, 'kick'),
+                  ),
+              ],
+              const SizedBox(height: 8),
             ],
-            const SizedBox(height: 8),
-          ],
+          ),
         ),
       ),
     );
@@ -786,7 +847,42 @@ class _GameScreenState extends State<GameScreen> {
         _kickPlayer(player);
       case 'replace':
         _showReplaceSheet(player);
+      case 'giveJailCard':
+        _giveJailCard(player);
     }
+  }
+
+  /// Hands one of my held Get Out of Jail Free cards to [player] — a
+  /// trade, like handing over a property. Money leaves the account on
+  /// confirmation only, so this deserves the same courtesy even though
+  /// nothing here is money.
+  Future<void> _giveJailCard(Player player) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text('Give your card to ${player.name}?'),
+        content: const Text(
+          'They\'ll be able to use it to leave jail for free.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(minimumSize: const Size(0, 44)),
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Give card'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    final result = await context.read<GameProvider>().transferJailCard(
+      player.id,
+    );
+    if (!mounted || result.isOk) return;
+    showSnack(context, result.error!);
   }
 
   /// Host-only: removes another player from the game. Their balance and

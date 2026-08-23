@@ -27,7 +27,12 @@ enum TransactionType {
   /// A property handed to another player directly (no money moves — any
   /// cash for the deal is a separate, normal [payment]). Logged at $0
   /// purely so the trade shows up in the activity feed.
-  transfer;
+  transfer,
+
+  /// A held Get Out of Jail Free card handed to another player directly —
+  /// same idea as [transfer], just for a card instead of a property. No
+  /// [GameTransaction.propertyId]; logged at $0 for the same reason.
+  jailCardTransfer;
 
   static TransactionType fromName(String name) =>
       TransactionType.values.firstWhere(

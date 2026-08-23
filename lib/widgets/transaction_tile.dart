@@ -78,6 +78,10 @@ class TransactionTile extends StatelessWidget {
         if (outgoing) return 'Transferred $_property to $to';
         if (incoming) return 'Received $_property from $from';
         return '$from transferred $_property to $to';
+      case TransactionType.jailCardTransfer:
+        if (outgoing) return 'Gave a Get Out of Jail Free card to $to';
+        if (incoming) return 'Got a Get Out of Jail Free card from $from';
+        return '$from gave a Get Out of Jail Free card to $to';
       case TransactionType.payment:
       case TransactionType.request:
         if (incoming) return 'From $from';
@@ -96,6 +100,7 @@ class TransactionTile extends StatelessWidget {
     TransactionType.tax => Icons.receipt_long_outlined,
     TransactionType.freeParking => Icons.local_parking_rounded,
     TransactionType.transfer => Icons.swap_horiz_rounded,
+    TransactionType.jailCardTransfer => Icons.confirmation_number_rounded,
     _ =>
       incoming
           ? Icons.south_west_rounded

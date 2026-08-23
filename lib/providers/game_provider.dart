@@ -42,6 +42,8 @@ typedef PropertyTransferEvent = ({
   String toId,
 });
 
+typedef JailCardTransferEvent = ({String fromId, String toId});
+
 typedef BankCollectionEvent = ({String playerId, int amount});
 
 typedef PaymentReceivedEvent = ({String fromId, int amount, bool isRent});
@@ -127,6 +129,8 @@ class GameProvider extends ChangeNotifier {
   final _diceRolls = StreamController<DiceRoll>.broadcast();
   final _propertyTransfers =
       StreamController<PropertyTransferEvent>.broadcast();
+  final _jailCardTransfers =
+      StreamController<JailCardTransferEvent>.broadcast();
   final _bankCollections = StreamController<BankCollectionEvent>.broadcast();
   final _bankPayments = StreamController<BankCollectionEvent>.broadcast();
   final _paymentsReceived = StreamController<PaymentReceivedEvent>.broadcast();
@@ -179,6 +183,12 @@ class GameProvider extends ChangeNotifier {
   /// device uses this to pop up a "you were given X" notice.
   Stream<PropertyTransferEvent> get propertyTransfers =>
       _propertyTransfers.stream;
+
+  /// Every Get Out of Jail Free card handed from one player to another —
+  /// lets the whole table get an activity-banner heads-up, same as a
+  /// property transfer.
+  Stream<JailCardTransferEvent> get jailCardTransfers =>
+      _jailCardTransfers.stream;
 
   /// Every free-form "Collect from bank" payment — anyone can trigger a
   /// bank payout, so this is what lets the rest of the table actually
@@ -930,6 +940,17 @@ class GameProvider extends ChangeNotifier {
     return _awaitVerdict(_client!.sendUseJailCard());
   }
 
+  /// Hands one of my held Get Out of Jail Free cards to [toId] — a trade,
+  /// like handing over a property. Not turn-gated.
+  Future<Result<void>> transferJailCard(String toId) {
+    if ((me?.jailCards ?? 0) <= 0) {
+      return Future.value(err("You don't have a Get Out of Jail Free card."));
+    }
+    final offline = _requireConnection();
+    if (offline != null) return Future.value(offline);
+    return _awaitVerdict(_client!.sendTransferJailCard(toId));
+  }
+
   // ------------------------------------------------------- Incoming events
 
   void _onMessage(WsMessage message) {
@@ -1027,6 +1048,34 @@ class GameProvider extends ChangeNotifier {
             ?.complete(ok(null));
         final json = message.payload['player'] as Map<String, dynamic>?;
         if (json != null) _upsertPlayer(Player.fromJson(json));
+      case MessageType.jailCardTransferred:
+        // Moves no money either, so this resolves the pending intent the
+        // same way jailCardUsed/propertyChanged do — two players change
+        // here, not one, so both get upserted.
+        _pendingPayments
+            .remove(message.payload['txId'] as String?)
+            ?.complete(ok(null));
+        final fromJson = message.payload['fromPlayer'] as Map<String, dynamic>?;
+        final toJson = message.payload['toPlayer'] as Map<String, dynamic>?;
+        if (fromJson != null && toJson != null) {
+          final fromPlayer = Player.fromJson(fromJson);
+          final toPlayer = Player.fromJson(toJson);
+          _upsertPlayer(fromPlayer);
+          _upsertPlayer(toPlayer);
+          final txJson =
+              message.payload['transaction'] as Map<String, dynamic>?;
+          if (txJson != null) {
+            final tx = GameTransaction.fromJson(txJson);
+            if (!_transactions.any((t) => t.id == tx.id)) {
+              _transactions.add(tx);
+              final record = _record;
+              if (record != null && _persistLocally) {
+                _db.insertTransactions(record.game.id, [tx]);
+              }
+            }
+            _jailCardTransfers.add((fromId: fromPlayer.id, toId: toPlayer.id));
+          }
+        }
       case MessageType.cardDrawn:
         final cardJson = message.payload['card'] as Map<String, dynamic>?;
         final drawerId = message.payload['playerId'] as String?;
@@ -1388,6 +1437,7 @@ class GameProvider extends ChangeNotifier {
     _cardDraws.close();
     _diceRolls.close();
     _propertyTransfers.close();
+    _jailCardTransfers.close();
     _bankCollections.close();
     _bankPayments.close();
     _paymentsReceived.close();

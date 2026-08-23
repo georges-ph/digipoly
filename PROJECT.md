@@ -261,15 +261,23 @@ board — boards with different names/currencies/properties must all work.
 - **Pass GO**: salary, doubled if landed on exactly — automatic on boards
   with a curated layout; a manual quick action on boards without one.
 - **Not modeled on purpose**: bankruptcy, structured trade offers (property
-  transfer + Send covers trades manually), transferring/selling a held Get
-  Out of Jail Free card between players (use it or keep it; handing it to
-  someone else is still a physical/manual affair, like a property trade's
-  cash side) — all candidates for later. A held card *is* visible though:
-  `PlayerAvatar` badges it (`Player.jailCards > 0`) wherever an avatar
-  shows identity, so the table can actually see who's holding one to
-  negotiate a trade for it — off only on the small board tokens
-  (`showJailCard: false`), already busy with the radar pulse and too tiny
-  for a legible badge.
+  transfer + Send covers trades manually) — candidates for later.
+- **Get Out of Jail Free cards are visible and tradeable**: `PlayerAvatar`
+  badges a held one (`Player.jailCards > 0`) wherever an avatar shows
+  identity, so the table can see who's holding one — off only on the
+  small board tokens (`showJailCard: false`), already busy with the radar
+  pulse and too tiny for a legible badge. A held card can be handed
+  directly to another player from their long-press sheet ("Give your Get
+  Out of Jail Free card") — a trade like a property transfer: no money
+  moves (any cash for the deal is a separate, normal Send), not turn-
+  gated, confirmed with a dialog first. Wire: `transferJailCard` intent →
+  `jailCardTransferred` event (both changed players + a $0
+  `TransactionType.jailCardTransfer` logged in the activity feed, same
+  pattern as a property transfer). The recipient gets a "card received"
+  popup wherever they're looking; the whole table gets an activity
+  banner. Selling one for cash instead of just giving it away is still a
+  manual/physical affair, same as any other side deal at the table —
+  the app moves the card, not who owed what for it.
 - The **bank** is account id `"bank"` with infinite money; anyone may
   trigger bank payouts (like trusting the physical banker) — every device
   gets a heads-up (a top banner) the moment someone else collects, since
@@ -325,8 +333,9 @@ All models are hand-written JSON (`toJson`/`fromJson`)
   + running `auctions`).
 - `game_transaction.dart` — typed: payment, rent, purchase, salary, house,
   request, card, mortgage, tax, freeParking, transfer (a property handed
-  over directly — always $0, logged purely as an activity-feed record);
-  optional propertyId; note.
+  over directly — always $0, logged purely as an activity-feed record),
+  jailCardTransfer (same idea, for a held Get Out of Jail Free card
+  instead — no propertyId); optional propertyId; note.
 - `property_ownership.dart` — propertyId → ownerId + houses (5 = hotel) +
   mortgaged.
 - `property_auction.dart` — `PropertyAuction` (propertyId, startedBy,
@@ -345,6 +354,8 @@ settles a money request), `buyProperty` (optional price = auction bid),
 toId; resolves via propertyChanged's txId), `moneyRequest`, `moneyRequestResponse` (decline by target / withdraw by
 requester), `rollDice`, `drawCard`, `editTransactionNote`, `payJailFine`,
 `useJailCard` (resolves via jailCardUsed's txId, moves no money),
+`transferJailCard` (toId; resolves via jailCardTransferred's txId, moves
+no money),
 `startAuction`, `placeBid`, `closeAuction`, `endTurn`, `leaveGame`,
 `dismissRoll` (drawId; a drawer's device signals it's about to show its
 own copy of a just-drawn Chance/Community Chest card's dialog — see
@@ -356,7 +367,9 @@ Events (server→client): `joinAccepted`/`joinRejected`, `snapshot`,
 `propertyChanged`, `transactionNoteUpdated`, `moneyRequested`,
 `moneyRequestResolved` (sent to BOTH parties), `jailCardUsed` (txId +
 updated player — no money moves, same pattern as propertyChanged),
-`diceRolled` (roll +
+`jailCardTransferred` (txId + both updated players + transaction — no
+money moves either, same pattern, just two players change instead of
+one), `diceRolled` (roll +
 turnRolled + full player list, since a curated-layout board also moves
 tokens on every roll + freeParkingPot), `cardDrawn` (+ full player list,
 since a "go to X"/jail card can move or grant a card to the drawer), `turnChanged`,
@@ -455,7 +468,8 @@ unbound-playerId gate).
   spectator): state, all actions
   (sendPayment/collectSalary/buyProperty/payRent/setHouses/requestMoney/
   respondToIncomingRequest/rollDice/drawCard/editTransactionNote/
-  payJailFine/useJailCard/startAuction/placeBid/closeAuction/endTurn),
+  payJailFine/useJailCard/transferJailCard/startAuction/placeBid/
+  closeAuction/endTurn),
   `watchRoom`
   (spectator join), reconnect, LAN IP
   (`roomEndpoint` — network_info_plus with NetworkInterface fallback for
