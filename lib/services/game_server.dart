@@ -1132,6 +1132,11 @@ class GameServer {
       reject('Amount must be greater than zero.');
       return;
     }
+    final note = (payload['note'] as String? ?? '').trim();
+    if (note.isEmpty) {
+      reject('Add a note for this loan.');
+      return;
+    }
 
     final player = _players[senderId]!;
     // Set first so the transaction's single broadcast already carries the
@@ -1150,6 +1155,7 @@ class GameServer {
         amount: amount,
         type: TransactionType.loan,
         timestamp: DateTime.now(),
+        note: note,
       ),
       reject,
       viewerId: senderId,
@@ -1180,6 +1186,11 @@ class GameServer {
       reject('Amount must be greater than zero.');
       return;
     }
+    final note = (payload['note'] as String? ?? '').trim();
+    if (note.isEmpty) {
+      reject('Add a note for this loan.');
+      return;
+    }
     final amount =
         requested > player.loanBalance ? player.loanBalance : requested;
 
@@ -1196,6 +1207,7 @@ class GameServer {
         amount: amount,
         type: TransactionType.loan,
         timestamp: DateTime.now(),
+        note: note,
       ),
       reject,
       viewerId: senderId,

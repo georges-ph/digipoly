@@ -147,17 +147,30 @@ class TransactionDetailsSheet extends StatelessWidget {
             if (player != null)
               PlayerAvatar(player: player, size: 30, showPresence: false)
             else
+              // Padding+border mirror PlayerAvatar's own always-reserved
+              // ring so the bank's icon takes up the exact same footprint
+              // as a player avatar — otherwise this row renders shorter
+              // and its icon sits visibly left of the row below it.
               Container(
-                width: 30,
-                height: 30,
-                decoration: BoxDecoration(
-                  color: scheme.surfaceContainerHigh,
+                padding: const EdgeInsets.all(3),
+                decoration: const BoxDecoration(
                   shape: BoxShape.circle,
+                  border: Border.fromBorderSide(
+                    BorderSide(color: Colors.transparent, width: 3),
+                  ),
                 ),
-                child: const Icon(
-                  Icons.account_balance_rounded,
-                  size: 16,
-                  color: AppColors.accent,
+                child: Container(
+                  width: 30,
+                  height: 30,
+                  decoration: BoxDecoration(
+                    color: scheme.surfaceContainerHigh,
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.account_balance_rounded,
+                    size: 16,
+                    color: AppColors.accent,
+                  ),
                 ),
               ),
             const SizedBox(width: 10),
@@ -179,7 +192,7 @@ class TransactionDetailsSheet extends StatelessWidget {
     Widget factRow(String label, String value) => Padding(
       padding: const EdgeInsets.symmetric(vertical: 6),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           SizedBox(
             width: 90,
@@ -292,7 +305,7 @@ class TransactionDetailsSheet extends StatelessWidget {
             factRow(
               'When',
               DateFormat(
-                'EEEE d MMM y · HH:mm:ss',
+                'EEEE d MMM y · h:mm:ss a',
               ).format(transaction.timestamp),
             ),
             if (balanceAfter != null)

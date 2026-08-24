@@ -207,22 +207,26 @@ class GameClient {
   }
 
   /// Borrows [amount] from the bank — adds to the outstanding loan
-  /// balance, interest accrues every lap of GO.
-  String sendTakeLoan(int amount) {
+  /// balance, interest accrues every lap of GO. [note] is required (unlike
+  /// a plain payment's note) since "Bank loan" alone doesn't say what it's
+  /// for.
+  String sendTakeLoan(int amount, String note) {
     final txId = const Uuid().v4();
     send(WsMessage(MessageType.takeLoan, {
       'id': txId,
       'amount': amount,
+      'note': note,
     }));
     return txId;
   }
 
   /// Repays up to [amount] off the outstanding loan balance.
-  String sendRepayLoan(int amount) {
+  String sendRepayLoan(int amount, String note) {
     final txId = const Uuid().v4();
     send(WsMessage(MessageType.repayLoan, {
       'id': txId,
       'amount': amount,
+      'note': note,
     }));
     return txId;
   }

@@ -21,6 +21,21 @@ class _LoanSheetState extends State<LoanSheet> {
   int _amount = 0;
   bool _busy = false;
   String? _error;
+  final _noteController = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    // Borrow/Repay are gated on a non-empty note, so the buttons need to
+    // re-evaluate as the user types.
+    _noteController.addListener(() => setState(() {}));
+  }
+
+  @override
+  void dispose() {
+    _noteController.dispose();
+    super.dispose();
+  }
 
   Future<void> _run(Future<Result<void>> Function() action) async {
     if (_busy || _amount <= 0) return;
@@ -86,6 +101,17 @@ class _LoanSheetState extends State<LoanSheet> {
               onChanged: (value) => setState(() => _amount = value),
             ),
             const SizedBox(height: 16),
+            TextField(
+              controller: _noteController,
+              maxLength: 60,
+              textCapitalization: TextCapitalization.sentences,
+              decoration: const InputDecoration(
+                labelText: 'What for?',
+                hintText: 'e.g. buying Boardwalk',
+                counterText: '',
+              ),
+            ),
+            const SizedBox(height: 16),
             Row(
               children: [
                 Expanded(
@@ -93,14 +119,33 @@ class _LoanSheetState extends State<LoanSheet> {
                     style: OutlinedButton.styleFrom(
                       minimumSize: const Size(0, 48),
                     ),
-                    onPressed: _busy || _amount <= 0 || owed <= 0
+                    onPressed:
+                        _busy ||
+                            _amount <= 0 ||
+                            owed <= 0 ||
+                            _noteController.text.trim().isEmpty
                         ? null
-                        : () => _run(
-                            () => session.repayLoan(
-                              _amount > owed ? owed : _amount,
-                            ),
-                          ),
-                    child: const Text('Repay'),
+                        : () {
+                            // The bank never repays more than what's owed —
+                            // clamp what's shown/sent so the button's own
+                            // amount (below) always matches what actually
+                            // happens.
+                            final repayAmount = _amount > owed
+                                ? owed
+                                : _amount;
+                            setState(() => _amount = repayAmount);
+                            _run(
+                              () => session.repayLoan(
+                                repayAmount,
+                                _noteController.text,
+                              ),
+                            );
+                          },
+                    child: Text(
+                      _amount > 0
+                          ? 'Repay ${formatMoney(_amount > owed ? owed : _amount, currency)}'
+                          : 'Repay',
+                    ),
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -109,9 +154,17 @@ class _LoanSheetState extends State<LoanSheet> {
                     style: FilledButton.styleFrom(
                       minimumSize: const Size(0, 48),
                     ),
-                    onPressed: _busy || _amount <= 0
+                    onPressed:
+                        _busy ||
+                            _amount <= 0 ||
+                            _noteController.text.trim().isEmpty
                         ? null
-                        : () => _run(() => session.takeLoan(_amount)),
+                        : () => _run(
+                            () => session.takeLoan(
+                              _amount,
+                              _noteController.text,
+                            ),
+                          ),
                     child: const Text('Borrow'),
                   ),
                 ),

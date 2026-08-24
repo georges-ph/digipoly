@@ -952,24 +952,31 @@ class GameProvider extends ChangeNotifier {
   }
 
   /// Borrows [amount] from the bank — adds to my outstanding loan balance;
-  /// interest accrues every lap of GO from here on.
-  Future<Result<void>> takeLoan(int amount) {
+  /// interest accrues every lap of GO from here on. [note] is required —
+  /// unlike a plain payment, "Bank loan" alone doesn't say what it's for.
+  Future<Result<void>> takeLoan(int amount, String note) {
     if (amount <= 0) {
       return Future.value(err('Amount must be greater than zero.'));
     }
+    if (note.trim().isEmpty) {
+      return Future.value(err('Add a note for this loan.'));
+    }
     final offline = _requireConnection();
     if (offline != null) return Future.value(offline);
-    return _awaitVerdict(_client!.sendTakeLoan(amount));
+    return _awaitVerdict(_client!.sendTakeLoan(amount, note.trim()));
   }
 
   /// Repays up to [amount] off my outstanding loan balance.
-  Future<Result<void>> repayLoan(int amount) {
+  Future<Result<void>> repayLoan(int amount, String note) {
     if (amount <= 0) {
       return Future.value(err('Amount must be greater than zero.'));
     }
+    if (note.trim().isEmpty) {
+      return Future.value(err('Add a note for this loan.'));
+    }
     final offline = _requireConnection();
     if (offline != null) return Future.value(offline);
-    return _awaitVerdict(_client!.sendRepayLoan(amount));
+    return _awaitVerdict(_client!.sendRepayLoan(amount, note.trim()));
   }
 
   // ------------------------------------------------------- Incoming events
