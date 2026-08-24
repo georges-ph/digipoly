@@ -19,6 +19,7 @@ import '../models/ws_message.dart';
 import '../services/database_service.dart';
 import '../services/discovery_service.dart';
 import '../services/game_client.dart';
+import '../services/game_engine.dart';
 import '../services/game_server.dart';
 import '../services/identity_service.dart';
 
@@ -320,6 +321,18 @@ class GameProvider extends ChangeNotifier {
     return board.properties
         .where((p) => _ownerships[p.id]?.ownerId == playerId)
         .toList();
+  }
+
+  /// [GameEngine.computeNetWorth] for [player] against this session's board
+  /// and current ownerships.
+  int netWorthOf(Player player) {
+    final board = game?.board;
+    if (board == null) return player.balance - player.loanBalance;
+    return GameEngine.computeNetWorth(
+      player: player,
+      board: board,
+      ownerships: _ownerships,
+    );
   }
 
   String? get currentTurnId => _currentTurnId;

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../models/player.dart';
+import '../models/property_ownership.dart';
 import '../providers/game_provider.dart';
 import '../services/game_client.dart';
 import '../theme/app_theme.dart';
@@ -48,7 +49,11 @@ class _DashboardBody extends StatelessWidget {
 
     final scheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
-    final players = session.players.where((p) => !p.hasLeft).toList();
+    // Ranked richest-first so the table can see who's winning at a glance —
+    // the turn highlight (isTurn, below) still tracks seat via
+    // currentTurnId, independent of this order.
+    final players = session.players.where((p) => !p.hasLeft).toList()
+      ..sort((a, b) => session.netWorthOf(b).compareTo(session.netWorthOf(a)));
     final turnPlayer = session.currentTurnPlayer;
 
     final playersPane = SingleChildScrollView(
@@ -249,6 +254,19 @@ class _PlayerCard extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
     final owned = session.propertiesOwnedBy(player.id);
+    final myOwnerships = session.ownerships.values.where(
+      (o) => o.ownerId == player.id,
+    );
+    // A hotel is stored as houses == 5 (PropertyOwnership.hotel), not 5
+    // houses — counted separately so "3 houses" doesn't silently include
+    // properties that are actually hotels.
+    final houseCount = myOwnerships
+        .where((o) => o.houses > 0 && o.houses < PropertyOwnership.hotel)
+        .fold<int>(0, (sum, o) => sum + o.houses);
+    final hotelCount = myOwnerships
+        .where((o) => o.houses == PropertyOwnership.hotel)
+        .length;
+    final mortgagedCount = myOwnerships.where((o) => o.mortgaged).length;
 
     return Container(
       width: 220,
@@ -269,15 +287,39 @@ class _PlayerCard extends StatelessWidget {
               PlayerAvatar(player: player, size: 40),
               const SizedBox(width: 10),
               Expanded(
-                child: Text(
-                  player.id == session.myPlayerId ? 'You' : player.name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.w800,
-                  ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      player.id == session.myPlayerId ? 'You' : player.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    if (player.loanBalance > 0)
+                      Text(
+                        'Owes ${formatMoney(player.loanBalance, currency)}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: textTheme.labelSmall?.copyWith(
+                          color: AppColors.expense,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                  ],
                 ),
               ),
+              if (player.inJail) ...[
+                const SizedBox(width: 6),
+                const Icon(
+                  Icons.local_police_rounded,
+                  size: 18,
+                  color: AppColors.jailCard,
+                ),
+              ],
             ],
           ),
           const SizedBox(height: 12),
@@ -293,6 +335,33 @@ class _PlayerCard extends StatelessWidget {
               ),
             ),
           ),
+          if (houseCount > 0 || hotelCount > 0 || mortgagedCount > 0) ...[
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 6,
+              runSpacing: 4,
+              children: [
+                if (houseCount > 0)
+                  _StatusChip(
+                    icon: Icons.house_rounded,
+                    label: '$houseCount',
+                    color: scheme.onSurfaceVariant,
+                  ),
+                if (hotelCount > 0)
+                  _StatusChip(
+                    icon: Icons.apartment_rounded,
+                    label: '$hotelCount',
+                    color: scheme.onSurfaceVariant,
+                  ),
+                if (mortgagedCount > 0)
+                  _StatusChip(
+                    icon: Icons.money_off_rounded,
+                    label: '$mortgagedCount',
+                    color: scheme.onSurfaceVariant,
+                  ),
+              ],
+            ),
+          ],
           const SizedBox(height: 10),
           if (owned.isEmpty)
             Text(
@@ -320,6 +389,48 @@ class _PlayerCard extends StatelessWidget {
                   ),
               ],
             ),
+        ],
+      ),
+    );
+  }
+}
+
+/// A small tinted pill for a player-card status callout (owes money, in
+/// jail) — kept separate from [PlayerAvatar]'s own jail-card badge, which
+/// marks *holding* a Get Out of Jail Free card rather than *being* jailed.
+class _StatusChip extends StatelessWidget {
+  const _StatusChip({required this.icon, this.label, required this.color});
+
+  final IconData icon;
+
+  /// Null renders an icon-only badge (e.g. jail — the color already reads
+  /// as "stuck", a count/label would be redundant).
+  final String? label;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.15),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 12, color: color),
+          if (label != null) ...[
+            const SizedBox(width: 4),
+            Text(
+              label!,
+              style: textTheme.labelSmall?.copyWith(
+                color: color,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
         ],
       ),
     );

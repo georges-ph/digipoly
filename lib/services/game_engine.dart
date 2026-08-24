@@ -213,6 +213,27 @@ abstract final class GameEngine {
     return total;
   }
 
+  /// A rough "if everything were liquidated today" net worth: cash minus
+  /// any bank loan, plus every unmortgaged property's price (a mortgaged
+  /// one's value was already cashed out via the mortgage payout, so it
+  /// adds nothing further), plus houses/hotels at their sell-back value —
+  /// half price, the actual cash [validateHouses] would return.
+  static int computeNetWorth({
+    required Player player,
+    required Board board,
+    required Map<String, PropertyOwnership> ownerships,
+  }) {
+    var total = player.balance - player.loanBalance;
+    for (final ownership in ownerships.values) {
+      if (ownership.ownerId != player.id) continue;
+      final property = _find(board, ownership.propertyId);
+      if (property == null) continue;
+      if (!ownership.mortgaged) total += property.price;
+      total += ownership.houses * property.housePrice ~/ 2;
+    }
+    return total;
+  }
+
   /// Validates changing the buildings on a street and returns the money
   /// movement: positive = owner pays the bank (building), negative = the
   /// bank pays the owner (selling back at half price, standard rule).

@@ -1625,9 +1625,9 @@ class GameServer {
           timestamp: DateTime.now(),
           note: 'Jail fine',
         );
-        // Only the two Tax squares feed the Free Parking pot — a jail fine
-        // is paid straight to the bank, same as a card money penalty.
-        _applyTransaction(
+        // The jail fine feeds the Free Parking pot, same as landing on Tax
+        // (a card money penalty still doesn't — see _handleDrawCard).
+        final applied = _applyTransaction(
           tx,
           (reason) => _sendTo(
             freed.id,
@@ -1643,6 +1643,7 @@ class GameServer {
           // they can and owing the rest.
           forced: true,
         );
+        if (applied) _freeParkingPot += tx.amount;
         _movePlayer(_players[freed.id]!, roll.total);
     }
   }
@@ -1665,8 +1666,6 @@ class GameServer {
     final game = _game!;
     // Clear the jail state first so the transaction's single broadcast
     // already carries the freed player, rather than a second broadcast.
-    // Paid straight to the bank — only the two Tax squares feed the Free
-    // Parking pot.
     _players[senderId] = player.copyWith(inJail: false, jailTurns: 0);
 
     final tx = GameTransaction(
@@ -1683,6 +1682,8 @@ class GameServer {
       _players[senderId] = player; // roll back — the fine wasn't paid
       return;
     }
+    // Feeds the Free Parking pot, same as landing on Tax.
+    _freeParkingPot += tx.amount;
     _db.setTurnState(
       game.id,
       currentTurnId: _currentTurnId,

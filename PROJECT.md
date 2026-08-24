@@ -83,14 +83,15 @@ board — boards with different names/currencies/properties must all work.
   - Passing/landing on GO auto-pays salary (doubled if landed on exactly) —
     the manual "Pass GO" quick action is hidden once a board has a layout.
   - Landing on Tax auto-charges the bank (`Property.price` reused as the
-    tax amount) and feeds the **Free Parking pot**; landing on Free Parking
-    pays the pot out and resets it to 0 (a house rule, not official
-    Monopoly, added because the user wanted it). **Only the two Tax
-    squares feed the pot** — a jail fine and a Chance/Community Chest money
-    penalty (including a building-repairs card) are paid straight to the
-    bank, same as official rules, and never touch the pot. This is a
-    deliberate, narrower scope than some versions of the house rule (which
-    often throw jail fines and card penalties in too) — matches how the
+    tax amount) and feeds the **Free Parking pot**, as does the jail fine
+    (paid either voluntarily via `payJailFine` or forced on the 3rd failed
+    jail roll); landing on Free Parking pays the pot out and resets it to 0
+    (a house rule, not official Monopoly, added because the user wanted
+    it). A Chance/Community Chest money penalty (including a
+    building-repairs card) is still paid straight to the bank, same as
+    official rules, and never touches the pot — only Tax and the jail fine
+    do, a deliberate, narrower scope than some versions of the house rule
+    (which often throw card penalties in too as well) — matches how the
     user has always actually played it.
   - Landing on Go To Jail teleports to `Board.jailIndex`, sets `inJail`.
   - Landing on Chance/Community Chest auto-draws a card (same server logic
