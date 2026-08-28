@@ -804,6 +804,18 @@ class _GameScreenState extends State<GameScreen> {
                   isMe ? 'You' : player.name,
                   style: const TextStyle(fontWeight: FontWeight.w800),
                 ),
+                // Cash plus everything liquidated at sell-back value — a
+                // quick way to see who's actually ahead if the table's
+                // deciding whether to call the game, not just here on the
+                // dashboard.
+                subtitle: session.game == null
+                    ? null
+                    : Text(
+                        'Net worth ${formatMoney(
+                          session.netWorthOf(player),
+                          session.game!.board.currencySymbol,
+                        )}',
+                      ),
               ),
               const Divider(height: 1),
               if (!isMe) ...[

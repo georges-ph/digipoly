@@ -335,6 +335,20 @@ class _PlayerCard extends StatelessWidget {
               ),
             ),
           ),
+          const SizedBox(height: 2),
+          // Cash plus everything liquidated at sell-back value — the
+          // table's own rank order (this list is already sorted richest
+          // net-worth-first) so anyone deciding whether to call the game
+          // can see who's actually ahead, not just who's holding more cash.
+          Text(
+            'Net worth ${formatMoney(session.netWorthOf(player), currency)}',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: textTheme.labelSmall?.copyWith(
+              color: scheme.onSurfaceVariant,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
           if (houseCount > 0 || hotelCount > 0 || mortgagedCount > 0) ...[
             const SizedBox(height: 8),
             Wrap(
