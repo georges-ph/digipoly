@@ -60,6 +60,10 @@ class GameServer {
   bool _turnRolled = false;
   int _freeParkingPot = 0;
 
+  /// True once the host has called the game — see `_handleEndGame`. Rolling
+  /// and ending a turn stop working; every device shows final standings.
+  bool _gameEnded = false;
+
   /// How many doubles the current player has rolled in a row this turn —
   /// three sends them straight to jail instead of moving/re-rolling. Reset
   /// whenever the turn changes; not persisted (a host restart mid-streak
@@ -105,6 +109,7 @@ class GameServer {
     DiceRoll? lastRoll,
     bool turnRolled = false,
     int freeParkingPot = 0,
+    bool gameEnded = false,
   }) async {
     if (isRunning) await stop();
 
@@ -137,6 +142,7 @@ class GameServer {
     _lastRoll = lastRoll;
     _turnRolled = turnRolled;
     _freeParkingPot = freeParkingPot;
+    _gameEnded = gameEnded;
 
     await _loadWebApp();
 
@@ -347,6 +353,8 @@ class GameServer {
             _handleLeave(playerId);
           case MessageType.kickPlayer:
             _handleKickPlayer(playerId, message.payload);
+          case MessageType.endGame:
+            _handleEndGame(playerId);
           case MessageType.dismissRoll:
             _handleDismissRoll(playerId, message.payload);
           default:
@@ -1410,7 +1418,7 @@ class GameServer {
   /// — no position tracking means the three-doubles rule can't apply there
   /// either.
   void _handleRollDice(String senderId) {
-    if (senderId != _currentTurnId || _turnRolled) return;
+    if (_gameEnded || senderId != _currentTurnId || _turnRolled) return;
     final game = _game!;
     final board = game.board;
     final roll = DiceRoll(
@@ -2006,8 +2014,30 @@ class GameServer {
 
   void _handleEndTurn(String senderId, WebSocketChannel channel) {
     // A turn is: roll, act, end. No ending a turn without having rolled.
-    if (senderId != _currentTurnId || !_turnRolled) return;
+    if (_gameEnded || senderId != _currentTurnId || !_turnRolled) return;
     _advanceTurn();
+  }
+
+  /// Host-only: calls the game. Doesn't tear down the room — just flips
+  /// `gameEnded` (enforced here for rolling/ending a turn; the client
+  /// additionally gates every other money-moving action on it, see
+  /// `GameProvider.canResolve`/`canAct`) and tells every device to show
+  /// final net-worth standings. There's no bankruptcy or win-condition
+  /// tracking here, so this is the deliberate, manual "the table's decided
+  /// to stop" moment instead.
+  void _handleEndGame(String senderId) {
+    final game = _game;
+    if (game == null || senderId != game.hostId || _gameEnded) return;
+    _gameEnded = true;
+    _db.setTurnState(
+      game.id,
+      currentTurnId: _currentTurnId,
+      lastRoll: _lastRoll,
+      turnRolled: _turnRolled,
+      freeParkingPot: _freeParkingPot,
+      gameEnded: true,
+    );
+    _broadcast(const WsMessage(MessageType.gameEnded));
   }
 
   void _advanceTurn() {
@@ -2103,6 +2133,7 @@ class GameServer {
     turnRolled: _turnRolled,
     freeParkingPot: _freeParkingPot,
     auctions: _auctions.values.toList(),
+    gameEnded: _gameEnded,
   );
 
   void _send(WebSocketChannel channel, WsMessage message) =>

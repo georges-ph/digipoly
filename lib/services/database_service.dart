@@ -48,7 +48,7 @@ class DatabaseService {
 
     _db = await openDatabase(
       path,
-      version: 4,
+      version: 5,
       onCreate: (db, version) async {
         await db.execute(
           'CREATE TABLE boards('
@@ -60,7 +60,8 @@ class DatabaseService {
           'my_player_id TEXT NOT NULL, host_address TEXT, host_port INTEGER, '
           'last_played_at INTEGER NOT NULL, current_turn_id TEXT, '
           'last_roll TEXT, turn_rolled INTEGER NOT NULL DEFAULT 0, '
-          'free_parking_pot INTEGER NOT NULL DEFAULT 0)',
+          'free_parking_pot INTEGER NOT NULL DEFAULT 0, '
+          'game_ended INTEGER NOT NULL DEFAULT 0)',
         );
         await db.execute(
           'CREATE TABLE players('
@@ -94,6 +95,12 @@ class DatabaseService {
           await db.execute(
             'ALTER TABLE games ADD COLUMN '
             'free_parking_pot INTEGER NOT NULL DEFAULT 0',
+          );
+        }
+        if (oldVersion < 5) {
+          await db.execute(
+            'ALTER TABLE games ADD COLUMN '
+            'game_ended INTEGER NOT NULL DEFAULT 0',
           );
         }
       },
@@ -131,7 +138,8 @@ class DatabaseService {
 
   // A plain `INSERT OR REPLACE` deletes the existing row on conflict, so any
   // column not listed here — current_turn_id/last_roll/turn_rolled/
-  // free_parking_pot, all written separately via setTurnState — would get
+  // free_parking_pot/game_ended, all written separately via setTurnState —
+  // would get
   // silently reset to its default. This game hasn't just started a fresh
   // turn just because its GameRecord (role/address/last-played, etc.)
   // changed, which happens far more often (every reconnect re-applies a
@@ -300,6 +308,7 @@ class DatabaseService {
     DiceRoll? lastRoll,
     bool turnRolled = false,
     int freeParkingPot = 0,
+    bool gameEnded = false,
   }) =>
       _db.update(
         'games',
@@ -309,6 +318,7 @@ class DatabaseService {
               lastRoll == null ? null : jsonEncode(lastRoll.toJson()),
           'turn_rolled': turnRolled ? 1 : 0,
           'free_parking_pot': freeParkingPot,
+          'game_ended': gameEnded ? 1 : 0,
         },
         where: 'id = ?',
         whereArgs: [gameId],
@@ -319,6 +329,7 @@ class DatabaseService {
     DiceRoll? lastRoll,
     bool turnRolled,
     int freeParkingPot,
+    bool gameEnded,
   })> getTurnState(String gameId) async {
     final rows = await _db.query(
       'games',
@@ -327,6 +338,7 @@ class DatabaseService {
         'last_roll',
         'turn_rolled',
         'free_parking_pot',
+        'game_ended',
       ],
       where: 'id = ?',
       whereArgs: [gameId],
@@ -337,6 +349,7 @@ class DatabaseService {
         lastRoll: null,
         turnRolled: false,
         freeParkingPot: 0,
+        gameEnded: false,
       );
     }
     final row = rows.first;
@@ -348,6 +361,7 @@ class DatabaseService {
           : DiceRoll.fromJson(jsonDecode(rollJson) as Map<String, dynamic>),
       turnRolled: (row['turn_rolled'] as int? ?? 0) != 0,
       freeParkingPot: row['free_parking_pot'] as int? ?? 0,
+      gameEnded: (row['game_ended'] as int? ?? 0) != 0,
     );
   }
 
@@ -379,6 +393,7 @@ class DatabaseService {
       lastRoll: snapshot.lastRoll,
       turnRolled: snapshot.turnRolled,
       freeParkingPot: snapshot.freeParkingPot,
+      gameEnded: snapshot.gameEnded,
     );
   }
 }

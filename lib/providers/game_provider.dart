@@ -98,6 +98,7 @@ class GameProvider extends ChangeNotifier {
   DiceRoll? _lastRoll;
   bool _turnRolled = false;
   int _freeParkingPot = 0;
+  bool _gameEnded = false;
   MoneyRequest? _incomingRequest;
   ClientStatus _connection = ClientStatus.disconnected;
   bool _hostEnded = false;
@@ -144,6 +145,7 @@ class GameProvider extends ChangeNotifier {
       StreamController<OtherTransactionEvent>.broadcast();
   final _rollDismissals = StreamController<String>.broadcast();
   final _turnStarts = StreamController<String>.broadcast();
+  final _gameEndings = StreamController<void>.broadcast();
 
   /// Every drawId a `rollDismissed` broadcast has already arrived for.
   /// `rollDismissals` alone isn't enough to wait on: it's a live stream, so
@@ -186,6 +188,17 @@ class GameProvider extends ChangeNotifier {
   /// turn" wherever that player is looking, even if they've got some other
   /// screen open and would otherwise miss the roll button becoming live.
   Stream<String> get turnStarts => _turnStarts.stream;
+
+  /// Fires the moment the host calls the game live — not on a
+  /// snapshot/resume catch-up (a device joining or reconnecting after the
+  /// fact just sees [gameEnded] already true, without a popup). Used to
+  /// show the final-standings dialog once, right when it happens, wherever
+  /// everyone's looking.
+  Stream<void> get gameEndings => _gameEndings.stream;
+
+  /// True once the host has called the game — rolling and ending a turn
+  /// stop working, and every device shows final net-worth standings.
+  bool get gameEnded => _gameEnded;
 
   /// Every property handed from one player to another — the recipient's
   /// device uses this to pop up a "you were given X" notice.
@@ -354,21 +367,33 @@ class GameProvider extends ChangeNotifier {
   /// roll → act → end; End turn stays locked until the dice are thrown.
   bool get turnRolled => _turnRolled;
   bool get canRoll =>
-      isMyTurn && !_turnRolled && _connection == ClientStatus.connected;
+      !_gameEnded &&
+      isMyTurn &&
+      !_turnRolled &&
+      _connection == ClientStatus.connected;
   bool get canEndTurn =>
-      isMyTurn && _turnRolled && _connection == ClientStatus.connected;
+      !_gameEnded &&
+      isMyTurn &&
+      _turnRolled &&
+      _connection == ClientStatus.connected;
 
   /// Housekeeping — building/selling houses — happens on your own turn,
   /// *before* you roll. Money moves use [canResolve]; requesting money and
   /// answering someone's request are allowed anytime.
   bool get canAct =>
-      _connection == ClientStatus.connected && isMyTurn && !_turnRolled;
+      !_gameEnded &&
+      _connection == ClientStatus.connected &&
+      isMyTurn &&
+      !_turnRolled;
 
   /// Anything that resolves your position or moves money — buying the
   /// square you're on, paying its rent, sends, collects, drawing a card,
   /// GO salary — is allowed the whole turn: before the roll (last turn's
-  /// landing, taxes) or after it (this roll's).
-  bool get canResolve => _connection == ClientStatus.connected && isMyTurn;
+  /// landing, taxes) or after it (this roll's). Stops working once the
+  /// host has called the game (see [gameEnded]) — Request/Receive stay
+  /// available regardless, same as they always have.
+  bool get canResolve =>
+      !_gameEnded && _connection == ClientStatus.connected && isMyTurn;
 
   /// Accumulated Free Parking pot (0 on boards without a curated layout).
   int get freeParkingPot => _freeParkingPot;
@@ -480,6 +505,7 @@ class GameProvider extends ChangeNotifier {
         lastRoll: turnState.lastRoll,
         turnRolled: turnState.turnRolled,
         freeParkingPot: turnState.freeParkingPot,
+        gameEnded: turnState.gameEnded,
       );
     }
 
@@ -502,6 +528,7 @@ class GameProvider extends ChangeNotifier {
     _lastRoll = turnState.lastRoll;
     _turnRolled = turnState.turnRolled;
     _freeParkingPot = turnState.freeParkingPot;
+    _gameEnded = turnState.gameEnded;
     notifyListeners();
 
     final host = record.hostAddress;
@@ -548,6 +575,7 @@ class GameProvider extends ChangeNotifier {
     DiceRoll? lastRoll,
     bool turnRolled = false,
     int freeParkingPot = 0,
+    bool gameEnded = false,
   }) async {
     if (kIsWeb) {
       return err(
@@ -565,6 +593,7 @@ class GameProvider extends ChangeNotifier {
       lastRoll: lastRoll,
       turnRolled: turnRolled,
       freeParkingPot: freeParkingPot,
+      gameEnded: gameEnded,
     );
     if (!started.isOk) return err(started.error!);
     _server = server;
@@ -648,6 +677,16 @@ class GameProvider extends ChangeNotifier {
   /// themselves. Fire-and-forget, like other host-side moderation would be;
   /// the server enforces that only the host can do this.
   void kickPlayer(String playerId) => _client?.sendKickPlayer(playerId);
+
+  /// Host-only: calls the game for good — stops rolling/ending a turn and
+  /// tells every device to show final net-worth standings. There's no
+  /// bankruptcy or win-condition tracking, so this is the deliberate,
+  /// manual "the table's decided to stop" moment instead. Fire-and-forget,
+  /// like other host-side moderation; the server enforces that only the
+  /// host can do this.
+  void endGame() {
+    if (isHost) _client?.sendEndGame();
+  }
 
   /// Tears the session down but keeps the game on this device so it can be
   /// resumed later.
@@ -1227,6 +1266,21 @@ class GameProvider extends ChangeNotifier {
       case MessageType.kicked:
         _kicked = true;
         notifyListeners();
+      case MessageType.gameEnded:
+        _gameEnded = true;
+        final record = _record;
+        if (record != null && _persistLocally) {
+          _db.setTurnState(
+            record.game.id,
+            currentTurnId: _currentTurnId,
+            lastRoll: _lastRoll,
+            turnRolled: _turnRolled,
+            freeParkingPot: _freeParkingPot,
+            gameEnded: true,
+          );
+        }
+        _gameEndings.add(null);
+        notifyListeners();
       case MessageType.auctionStarted:
         final json = message.payload['auction'] as Map<String, dynamic>?;
         if (json != null) {
@@ -1324,6 +1378,7 @@ class GameProvider extends ChangeNotifier {
     _lastRoll = snapshot.lastRoll;
     _turnRolled = snapshot.turnRolled;
     _freeParkingPot = snapshot.freeParkingPot;
+    _gameEnded = snapshot.gameEnded;
 
     if (isHost) {
       // The server already persisted players and transactions.
@@ -1515,6 +1570,7 @@ class GameProvider extends ChangeNotifier {
     _otherTransactions.close();
     _rollDismissals.close();
     _turnStarts.close();
+    _gameEndings.close();
     super.dispose();
   }
 }

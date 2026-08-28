@@ -13,6 +13,16 @@ import '../widgets/board_layout_view.dart';
 import '../widgets/player_avatar.dart';
 import 'properties_screen.dart';
 
+/// The game-over banner's headline — [players] is already sorted richest
+/// net-worth-first, so the winner is just its first (non-departed) entry.
+String _gameOverTitle(GameProvider session, List<Player> players) {
+  if (players.isEmpty) return 'Game over';
+  final winner = players.first;
+  return winner.id == session.myPlayerId
+      ? 'Game over — you win'
+      : 'Game over — ${winner.name} wins';
+}
+
 /// Table-wide view for any big screen: every balance, who owns what, whose
 /// turn it is, and the live activity ticker. Works in any orientation.
 class DashboardScreen extends StatelessWidget {
@@ -61,7 +71,36 @@ class _DashboardBody extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (turnPlayer != null) ...[
+          if (session.gameEnded) ...[
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+              decoration: BoxDecoration(
+                gradient: AppColors.heroGradient,
+                borderRadius: BorderRadius.circular(18),
+              ),
+              child: Row(
+                children: [
+                  const Icon(
+                    Icons.emoji_events_rounded,
+                    color: Colors.white,
+                    size: 26,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      _gameOverTitle(session, players),
+                      style: textTheme.titleMedium?.copyWith(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+          ] else if (turnPlayer != null) ...[
             Container(
               width: double.infinity,
               padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
@@ -122,12 +161,13 @@ class _DashboardBody extends StatelessWidget {
             spacing: 12,
             runSpacing: 12,
             children: [
-              for (final player in players)
+              for (var i = 0; i < players.length; i++)
                 _PlayerCard(
-                  player: player,
+                  player: players[i],
                   session: session,
                   currency: game.board.currencySymbol,
-                  isTurn: player.id == session.currentTurnId,
+                  isTurn: players[i].id == session.currentTurnId,
+                  isWinner: session.gameEnded && i == 0,
                 ),
             ],
           ),
@@ -242,12 +282,17 @@ class _PlayerCard extends StatelessWidget {
     required this.session,
     required this.currency,
     required this.isTurn,
+    this.isWinner = false,
   });
 
   final Player player;
   final GameProvider session;
   final String currency;
   final bool isTurn;
+
+  /// Highest net worth once the game's been called — see
+  /// [GameProvider.gameEnded].
+  final bool isWinner;
 
   @override
   Widget build(BuildContext context) {
@@ -275,7 +320,11 @@ class _PlayerCard extends StatelessWidget {
         color: scheme.surfaceContainerLow,
         borderRadius: BorderRadius.circular(AppTheme.radius),
         border: Border.all(
-          color: isTurn ? AppColors.accent : Colors.transparent,
+          color: isWinner
+              ? AppColors.income
+              : isTurn
+              ? AppColors.accent
+              : Colors.transparent,
           width: 2,
         ),
       ),
@@ -285,6 +334,14 @@ class _PlayerCard extends StatelessWidget {
           Row(
             children: [
               PlayerAvatar(player: player, size: 40),
+              if (isWinner) ...[
+                const SizedBox(width: 4),
+                const Icon(
+                  Icons.emoji_events_rounded,
+                  size: 18,
+                  color: AppColors.income,
+                ),
+              ],
               const SizedBox(width: 10),
               Expanded(
                 child: Column(

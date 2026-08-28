@@ -101,6 +101,7 @@ class GameSnapshot {
     this.turnRolled = false,
     this.freeParkingPot = 0,
     this.auctions = const [],
+    this.gameEnded = false,
   });
 
   final Game game;
@@ -121,6 +122,12 @@ class GameSnapshot {
   /// Auctions currently running at the table, if any.
   final List<PropertyAuction> auctions;
 
+  /// The host called the game (see `endGame`/`gameEnded` on the wire) —
+  /// rolling and ending a turn stop working, and every device shows the
+  /// final net-worth standings. Not the same as [Game] being deleted or the
+  /// host closing the room; the table can still look around and settle up.
+  final bool gameEnded;
+
   Map<String, dynamic> toJson() => {
         'game': game.toJson(),
         'players': players.map((p) => p.toJson()).toList(),
@@ -131,6 +138,7 @@ class GameSnapshot {
         'turnRolled': turnRolled,
         'freeParkingPot': freeParkingPot,
         'auctions': auctions.map((a) => a.toJson()).toList(),
+        'gameEnded': gameEnded,
       };
 
   factory GameSnapshot.fromJson(Map<String, dynamic> json) => GameSnapshot(
@@ -153,5 +161,6 @@ class GameSnapshot {
         auctions: (json['auctions'] as List<dynamic>? ?? const [])
             .map((e) => PropertyAuction.fromJson(e as Map<String, dynamic>))
             .toList(),
+        gameEnded: json['gameEnded'] as bool? ?? false,
       );
 }

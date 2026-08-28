@@ -246,6 +246,30 @@ board — boards with different names/currencies/properties must all work.
   this device's own permanent one) is handled by `GameProvider.myPlayerId`
   preferring the game's own `GameRecord.myPlayerId` over
   `IdentityService.playerId`.
+- **End game**: host-only, from the game screen's overflow menu ("End
+  game…", confirmed first — there's no undo). There's still no bankruptcy
+  or win-condition tracking, so this is the deliberate, manual "the table's
+  decided to stop" moment: it stops rolling and ending a turn table-wide
+  (`GameProvider.canRoll`/`canEndTurn`/`canAct`/`canResolve` all gate on
+  `!gameEnded`; enforced server-side too, in `_handleRollDice`/
+  `_handleEndTurn` — Request/Receive stay available regardless, same as
+  always) and tells every device to pop up final standings — every active
+  player ranked by net worth, crowning the top one — via
+  `GameProvider.gameEndings` (fires once, live, not on a snapshot catch-up)
+  and `widgets/game_end_dialog.dart`. `GameProvider.gameEnded` persists
+  (`GameSnapshot.gameEnded`, `DatabaseService` `games.game_ended` column,
+  threaded through the same `setTurnState`/`getTurnState` roll-state
+  bundle) so it survives a host restart or a client reconnecting after the
+  fact — a late reconnect just sees the persistent "Game ended" banner
+  (with a "View" button reopening the same dialog) rather than the popup
+  firing again. The game screen replaces its roll/end-turn row with that
+  banner once ended (rather than merely disabling the buttons, which would
+  read as a bug); the dashboard swaps its turn banner for a "Game over —
+  ‹name› wins" one and badges the (already net-worth-sorted) winner's
+  card with a crown. Wire: `endGame` intent, `gameEnded` event (no
+  payload — every device already has the players/ownerships/board needed
+  to compute standings locally via the existing `GameEngine.computeNetWorth`
+  /`GameProvider.netWorthOf`, so nothing needs to ride along on the wire).
 - **Chance / Community Chest**: quick actions draw the next card off the
   board's deck **on the server** — a shuffled pile per deck, dealt in order
   and reshuffled from scratch only once it runs out, like a physical stack
@@ -415,7 +439,8 @@ paymentApplied/paymentRejected events, since real cash moves both ways),
 `dismissRoll` (drawId; a drawer's device signals it's about to show its
 own copy of a just-drawn Chance/Community Chest card's dialog — see
 below),
-`kickPlayer` (host-only; see Kick / Replace above).
+`kickPlayer` (host-only; see Kick / Replace above), `endGame` (host-only;
+see End game above).
 
 Events (server→client): `joinAccepted`/`joinRejected`, `snapshot`,
 `paymentApplied` (tx + full player list + freeParkingPot), `paymentRejected`,
@@ -441,7 +466,9 @@ device also checks `GameProvider.wasDismissed(drawId)` before waiting on
 the live stream for it, since a signal that already arrived can't be
 replayed to a listener that starts even slightly late, which a spam-drawn
 burst makes easy to hit), `kicked` (sent only
-to the removed player, right before the server closes their connection).
+to the removed player, right before the server closes their connection),
+`gameEnded` (no payload — see End game above; every device already has
+what it needs to compute standings locally).
 
 Intent ids (txId) make retries idempotent; pending intents resolve via
 completers in `GameProvider` with timeouts. `payJailFine` has no dedicated
@@ -504,10 +531,11 @@ unbound-playerId gate).
   auctions purely in memory (`_auctions`); `_spectators` is a parallel set
   of read-only sockets that get every broadcast but never a bound playerId.
 - `game_client.dart` — transport only (web_socket_channel).
-- `database_service.dart` — sqflite; v4 schema: `boards`, `games`
+- `database_service.dart` — sqflite; v5 schema: `boards`, `games`
   (+current_turn_id, last_roll, turn_rolled — roll state survives a host
   restart, so reopening the app mid-turn doesn't grant a fresh roll —
-  +free_parking_pot), `players`, `game_transactions`, `game_properties`
+  +free_parking_pot, +game_ended — see End game above), `players`,
+  `game_transactions`, `game_properties`
   (all JSON columns; `Player.position`/`inJail`/`jailTurns`/`jailCards` and
   the new `PropertyKind`s need no schema change, they're just more JSON
   fields).
@@ -530,14 +558,15 @@ unbound-playerId gate).
   (sendPayment/collectSalary/buyProperty/payRent/setHouses/requestMoney/
   respondToIncomingRequest/rollDice/drawCard/editTransactionNote/
   payJailFine/useJailCard/transferJailCard/takeLoan/repayLoan/startAuction/
-  placeBid/closeAuction/endTurn),
+  placeBid/closeAuction/endTurn/endGame),
   `watchRoom`
   (spectator join), reconnect, LAN IP
   (`roomEndpoint` — network_info_plus with NetworkInterface fallback for
-  Windows), `errors` + `cardDraws` + `diceRolls` streams,
+  Windows), `errors` + `cardDraws` + `diceRolls` + `turnStarts` +
+  `gameEndings` streams,
   `canAct`/`canResolve`/`canRoll`/`canEndTurn`/`canPayJailFine`/
   `canUseJailCard`,
-  `freeParkingPot`, `auctions`/`auctionFor`, `isSpectating`.
+  `freeParkingPot`, `auctions`/`auctionFor`, `isSpectating`, `gameEnded`.
 - `GamesProvider` (home list), `BoardsProvider` (board CRUD).
 
 ## Screens & UX conventions
@@ -565,7 +594,11 @@ Flat layout: `lib/screens`, `lib/widgets`, `lib/theme`, `lib/utils`.
   with dice result), a jail banner (use a held Get Out of Jail Free card,
   pay the fine, or roll for doubles) when
   I'm in jail, a standing-loan banner (regardless of turn — see Bank loans
-  above) when I owe the bank, roll/end-turn row (only on my turn), quick
+  above) when I owe the bank, a "Game ended" banner with a "View" button
+  reopening the final-standings dialog once the host's called it (see End
+  game above — replaces the roll/end-turn row entirely rather than merely
+  disabling it, which would read as a bug), roll/end-turn row (only on my
+  turn, and only while the game hasn't ended), quick
   actions (Send, Request, Scan & pay, Receive, Pass GO, Collect, Chance,
   Chest, Loan — Send/Collect/GO/Chance/Chest/Loan gated by `canResolve`,
   Request/Receive/Scan & pay never (see turn flow above); **Pass GO is

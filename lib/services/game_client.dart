@@ -265,6 +265,10 @@ class GameClient {
   void sendDismissRoll(String drawId) =>
       send(WsMessage(MessageType.dismissRoll, {'drawId': drawId}));
 
+  /// Host-only: calls the game — stops rolling/ending a turn table-wide and
+  /// tells every device to show final net-worth standings.
+  void sendEndGame() => send(const WsMessage(MessageType.endGame));
+
   void _handleClosed(WebSocketChannel channel) {
     if (_channel != channel) return;
     _channel = null;

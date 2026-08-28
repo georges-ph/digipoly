@@ -25,6 +25,7 @@ import '../widgets/activity_feed.dart';
 import '../widgets/auction_card.dart';
 import '../widgets/balance_card.dart';
 import '../widgets/board_layout_view.dart';
+import '../widgets/game_end_dialog.dart';
 import '../widgets/loan_sheet.dart';
 import '../widgets/player_avatar.dart';
 import '../widgets/quick_action_button.dart';
@@ -63,6 +64,7 @@ class _GameScreenState extends State<GameScreen> {
   StreamSubscription<JailEvent>? _jailEntrySub;
   StreamSubscription<OtherTransactionEvent>? _otherTxSub;
   StreamSubscription<String>? _turnStartSub;
+  StreamSubscription<void>? _gameEndSub;
   final _nfc = NfcService.instance;
   bool _nfcAvailable = false;
   GameProvider? _session;
@@ -229,6 +231,12 @@ class _GameScreenState extends State<GameScreen> {
           meta: 'Roll the dice to get started.',
         ),
       );
+    });
+    // The host just called the game — pop the final standings up wherever
+    // everyone's looking, the moment it happens.
+    _gameEndSub = session.gameEndings.listen((_) {
+      if (!mounted) return;
+      showGameEndDialog(context);
     });
     // Someone handed a property directly to another player (not a
     // landing/buy). The recipient gets a full dialog, same as an incoming
@@ -536,6 +544,7 @@ class _GameScreenState extends State<GameScreen> {
     _jailEntrySub?.cancel();
     _otherTxSub?.cancel();
     _turnStartSub?.cancel();
+    _gameEndSub?.cancel();
     _session?.removeListener(_maybeShowRequestDialog);
     _nfc.stopWatch();
     _pendingRollUi.dispose();
@@ -964,6 +973,37 @@ class _GameScreenState extends State<GameScreen> {
     );
     if (confirmed != true || !mounted) return;
     context.read<GameProvider>().kickPlayer(player.id);
+  }
+
+  /// Host-only: calls the game for the whole table. There's no bankruptcy
+  /// or win-condition tracking, so this is the deliberate "we're done"
+  /// moment — it stops rolling/ending a turn and shows everyone the final
+  /// net-worth standings. Hard to reverse (there's no "resume" for it), so
+  /// it always asks first.
+  Future<void> _confirmEndGame() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('End the game?'),
+        content: const Text(
+          'Rolling and ending a turn stop working, and everyone sees the '
+          'final net-worth standings. This can\'t be undone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(minimumSize: const Size(0, 44)),
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('End game'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    context.read<GameProvider>().endGame();
   }
 
   /// Host-only: shares a join link/QR tagged to [player]'s now-open seat —
@@ -1407,6 +1447,10 @@ class _GameScreenState extends State<GameScreen> {
                   );
                 case 'saveBoard':
                   _saveBoardToMyBoards();
+                case 'endGame':
+                  _confirmEndGame();
+                case 'standings':
+                  showGameEndDialog(context);
                 case 'leave':
                   _leaveGame();
               }
@@ -1424,6 +1468,19 @@ class _GameScreenState extends State<GameScreen> {
                 value: 'saveBoard',
                 child: Text('Save board to My Boards'),
               ),
+              // Host-only, and only while the game hasn't already been
+              // called — once it has, everyone (not just the host) gets a
+              // way to pull the standings back up instead.
+              if (session.isHost && !session.gameEnded)
+                const PopupMenuItem(
+                  value: 'endGame',
+                  child: Text('End game…'),
+                ),
+              if (session.gameEnded)
+                const PopupMenuItem(
+                  value: 'standings',
+                  child: Text('Final standings'),
+                ),
               const PopupMenuItem(
                 value: 'leave',
                 child: Text('Leave game'),
@@ -1503,6 +1560,38 @@ class _GameScreenState extends State<GameScreen> {
           ),
         ),
       ],
+      // The host called it — rolling/ending a turn are done for good, so
+      // this replaces those controls rather than just disabling them,
+      // which would otherwise read as a bug ("why can't I roll?").
+      if (session.gameEnded) ...[
+        const SizedBox(height: 14),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: AppColors.accent.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(AppTheme.radius),
+          ),
+          child: Row(
+            children: [
+              const Icon(Icons.emoji_events_rounded, color: AppColors.accent),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'Game ended — see the final standings',
+                  style: textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              TextButton(
+                onPressed: () => showGameEndDialog(context),
+                child: const Text('View'),
+              ),
+            ],
+          ),
+        ),
+      ],
       // Auctions aren't turn-gated — anyone can be bidding at any time,
       // so they're visible to the whole table regardless of whose turn
       // it is.
@@ -1511,9 +1600,9 @@ class _GameScreenState extends State<GameScreen> {
         for (final auction in session.auctions.values)
           AuctionCard(auction: auction),
       ],
-      // A turn is roll → act → end; the controls only show up when
-      // it's actually this player's move.
-      if (session.isMyTurn) ...[
+      // A turn is roll → act → end; the controls only show up when it's
+      // actually this player's move, and only while the game is still on.
+      if (session.isMyTurn && !session.gameEnded) ...[
         const SizedBox(height: 14),
         if (session.me?.inJail == true) ...[
           Container(
@@ -1934,7 +2023,7 @@ class _BoardSheet extends StatelessWidget {
                 ),
               ),
             ),
-            if (session.isMyTurn) ...[
+            if (session.isMyTurn && !session.gameEnded) ...[
               const SizedBox(height: 14),
               Row(
                 children: [
