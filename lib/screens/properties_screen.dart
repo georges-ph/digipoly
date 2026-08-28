@@ -226,7 +226,7 @@ class _PropertyTile extends StatelessWidget {
         overflow: TextOverflow.ellipsis,
         style: textTheme.bodyLarge?.copyWith(
           fontWeight: FontWeight.w700,
-          fontSize: (textTheme.bodyLarge?.fontSize ?? 16) + 1.5,
+          fontSize: (textTheme.bodyLarge?.fontSize ?? 16) + 3.5,
         ),
       ),
       subtitle: ownership != null && ownership!.mortgaged

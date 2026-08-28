@@ -594,7 +594,6 @@ class _GameScreenState extends State<GameScreen> {
         return _BoardSheet(
           onClose: () => Navigator.of(sheetContext).pop(),
           nfcAvailable: _nfcAvailable,
-          onRoll: _rollDice,
           pendingRollUi: _pendingRollUi,
         );
       },
@@ -1945,19 +1944,18 @@ class _GameScreenState extends State<GameScreen> {
 /// automatically on any roll (see `_diceRollSub` in [_GameScreenState]) and
 /// toggles via the app-bar button. Dismissible like any other sheet (its
 /// own close button, a drag, or tapping outside). On my own turn it also
-/// carries its own Roll/End turn row, so acting on a roll doesn't require
-/// closing the board first to reach those buttons on the main screen.
+/// floats its own Roll/End turn controls ([_BoardCenterControls]) in the
+/// ring's empty middle, so acting on a roll doesn't require closing the
+/// board first to reach those buttons on the main screen.
 class _BoardSheet extends StatelessWidget {
   const _BoardSheet({
     required this.onClose,
     required this.nfcAvailable,
-    required this.onRoll,
     required this.pendingRollUi,
   });
 
   final VoidCallback onClose;
   final bool nfcAvailable;
-  final VoidCallback onRoll;
 
   /// Mirrors [_GameScreenState._pendingRollUi] — disables Roll while my own
   /// previous roll's reveal (dice sheet, board popup, landed-property sheet)
@@ -2006,66 +2004,167 @@ class _BoardSheet extends StatelessWidget {
                 ),
               ],
             ),
-            ConstrainedBox(
-              constraints: BoxConstraints(
-                maxWidth: 420,
-                maxHeight: maxBoardHeight,
-              ),
-              child: BoardLayoutView(
-                board: board,
-                players: session.players,
-                ownerships: session.ownerships,
-                freeParkingPot: session.freeParkingPot,
-                onTapProperty: (property) => showPropertySheet(
-                  context,
-                  propertyId: property.id,
-                  nfcAvailable: nfcAvailable,
+            Stack(
+              alignment: Alignment.center,
+              children: [
+                ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxWidth: 420,
+                    maxHeight: maxBoardHeight,
+                  ),
+                  child: BoardLayoutView(
+                    board: board,
+                    players: session.players,
+                    ownerships: session.ownerships,
+                    freeParkingPot: session.freeParkingPot,
+                    onTapProperty: (property) => showPropertySheet(
+                      context,
+                      propertyId: property.id,
+                      nfcAvailable: nfcAvailable,
+                    ),
+                  ),
                 ),
-              ),
+                // A ring layout leaves its whole middle empty (same as a
+                // real board's card/logo area) — dropping the roll/end-turn
+                // controls there instead of below the board uses that
+                // space rather than growing the sheet, and means the
+                // buttons are right where the token you're watching move
+                // just landed. FittedBox lets it shrink gracefully on a
+                // board with few enough squares that the middle is tight.
+                if (session.isMyTurn && !session.gameEnded)
+                  Padding(
+                    padding: const EdgeInsets.all(20),
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: _BoardCenterControls(
+                        session: session,
+                        pendingRollUi: pendingRollUi,
+                      ),
+                    ),
+                  ),
+              ],
             ),
-            if (session.isMyTurn && !session.gameEnded) ...[
-              const SizedBox(height: 14),
-              Row(
-                children: [
-                  Expanded(
-                    child: ValueListenableBuilder<int>(
-                      valueListenable: pendingRollUi,
-                      builder: (context, pending, _) => FilledButton.icon(
-                        style: FilledButton.styleFrom(
-                          minimumSize: const Size(0, 44),
-                        ),
-                        onPressed: session.canRoll && pending == 0
-                            ? onRoll
-                            : null,
-                        icon: const Icon(Icons.casino_rounded),
-                        label: Text(
-                          session.turnRolled
-                              ? 'Rolled ${session.lastRoll?.total ?? ''}'
-                              : session.lastRoll?.isDouble == true &&
-                                    session.lastRoll?.playerId ==
-                                        session.myPlayerId
-                              ? 'Double — roll again'
-                              : 'Roll dice',
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: FilledButton.tonalIcon(
-                      style: FilledButton.styleFrom(
-                        minimumSize: const Size(0, 44),
-                      ),
-                      onPressed: session.canEndTurn ? session.endTurn : null,
-                      icon: const Icon(Icons.skip_next_rounded),
-                      label: const Text('End turn'),
-                    ),
-                  ),
-                ],
-              ),
-            ],
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// Roll/End turn, floated in the ring board's empty middle (see
+/// [_BoardSheet]) rather than in a row below it — a small floating card so
+/// it reads as sitting on the board rather than as a random overlay. Rolls
+/// inline instead of opening the separate dice sheet on top of the board —
+/// tapping "Roll dice" swaps it for the same tumbling/wobbling
+/// [_AnimatedDice] shown there, right where the button was, since covering
+/// the board back up would defeat the point of moving these controls onto
+/// it in the first place.
+class _BoardCenterControls extends StatefulWidget {
+  const _BoardCenterControls({
+    required this.session,
+    required this.pendingRollUi,
+  });
+
+  final GameProvider session;
+  final ValueNotifier<int> pendingRollUi;
+
+  @override
+  State<_BoardCenterControls> createState() => _BoardCenterControlsState();
+}
+
+class _BoardCenterControlsState extends State<_BoardCenterControls> {
+  bool _rolling = false;
+
+  /// True for a beat right after a roll settles. A double leaves
+  /// `canRoll` true again immediately (another throw is granted), which
+  /// would otherwise swap the settled dice straight back to a "roll
+  /// again" button in the same frame — never actually showing what was
+  /// just rolled. Holding this a moment gives the reveal a chance to be
+  /// seen before the button reappears.
+  bool _showingResult = false;
+
+  Future<void> _roll(GameProvider session) async {
+    if (_rolling) return;
+    setState(() {
+      _rolling = true;
+      _showingResult = false;
+    });
+    await _performRoll(context, session, (rolling) {
+      if (mounted) setState(() => _rolling = rolling);
+    });
+    if (!mounted) return;
+    setState(() => _showingResult = true);
+    await Future<void>.delayed(const Duration(milliseconds: 1400));
+    if (mounted) setState(() => _showingResult = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final session = widget.session;
+    final scheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+    // Once rolling starts (or it's already been rolled this turn, or the
+    // result is still being held on screen — see _showingResult), the
+    // button gives way to the dice themselves instead of sitting there
+    // disabled — same reasoning as the "Game ended" banner replacing the
+    // roll/end-turn row entirely rather than just graying it out.
+    final showRollButton = session.canRoll && !_rolling && !_showingResult;
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: scheme.surface.withValues(alpha: 0.94),
+        borderRadius: BorderRadius.circular(AppTheme.radius),
+        border: Border.all(color: scheme.outlineVariant),
+        boxShadow: [
+          BoxShadow(
+            color: scheme.shadow.withValues(alpha: 0.2),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (showRollButton)
+            ValueListenableBuilder<int>(
+              valueListenable: widget.pendingRollUi,
+              builder: (context, pending, _) => FilledButton.icon(
+                style: FilledButton.styleFrom(
+                  minimumSize: const Size(150, 44),
+                ),
+                onPressed: pending == 0 ? () => _roll(session) : null,
+                icon: const Icon(Icons.casino_rounded),
+                label: Text(
+                  session.lastRoll?.isDouble == true &&
+                          session.lastRoll?.playerId == session.myPlayerId
+                      ? 'Double — roll again'
+                      : 'Roll dice',
+                ),
+              ),
+            )
+          else ...[
+            _AnimatedDice(rolling: _rolling, dieSize: 46, spacing: 10),
+            const SizedBox(height: 6),
+            Text(
+              _rolling
+                  ? 'Rolling…'
+                  : 'Rolled ${session.lastRoll?.total ?? ''}'
+                        '${session.lastRoll?.isDouble == true ? ' — double!' : ''}',
+              style: textTheme.labelMedium?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+          const SizedBox(height: 8),
+          FilledButton.tonalIcon(
+            style: FilledButton.styleFrom(minimumSize: const Size(150, 44)),
+            onPressed: session.canEndTurn ? session.endTurn : null,
+            icon: const Icon(Icons.skip_next_rounded),
+            label: const Text('End turn'),
+          ),
+        ],
       ),
     );
   }
@@ -2118,22 +2217,8 @@ class _DiceSheet extends StatefulWidget {
   State<_DiceSheet> createState() => _DiceSheetState();
 }
 
-class _DiceSheetState extends State<_DiceSheet>
-    with SingleTickerProviderStateMixin {
-  final _random = Random();
-  Timer? _spinner;
+class _DiceSheetState extends State<_DiceSheet> {
   bool _rolling = false;
-  int _spin1 = 1;
-  int _spin2 = 4;
-
-  // A back-and-forth wobble while the dice are tumbling — 0.5 is "level",
-  // so animating back to it on landing (with an elastic curve) reads as a
-  // little bounce as the dice settle on their result.
-  late final _shake = AnimationController(
-    vsync: this,
-    value: 0.5,
-    duration: const Duration(milliseconds: 260),
-  );
 
   @override
   void initState() {
@@ -2145,38 +2230,11 @@ class _DiceSheetState extends State<_DiceSheet>
     });
   }
 
-  @override
-  void dispose() {
-    _spinner?.cancel();
-    _shake.dispose();
-    super.dispose();
-  }
-
   Future<void> _roll(GameProvider session) async {
     if (_rolling) return;
-    setState(() => _rolling = true);
-    _shake.repeat(reverse: true);
-    // Shuffle the faces while the server decides the real result.
-    _spinner = Timer.periodic(const Duration(milliseconds: 70), (_) {
-      setState(() {
-        _spin1 = _random.nextInt(6) + 1;
-        _spin2 = _random.nextInt(6) + 1;
-      });
+    await _performRoll(context, session, (rolling) {
+      if (mounted) setState(() => _rolling = rolling);
     });
-    final result = await session.rollDice();
-    _spinner?.cancel();
-    if (!mounted) return;
-    setState(() => _rolling = false);
-    _shake
-      ..stop()
-      ..animateTo(
-        0.5,
-        curve: Curves.elasticOut,
-        duration: const Duration(milliseconds: 500),
-      );
-    if (!result.isOk) {
-      showSnack(context, result.error!);
-    }
   }
 
   @override
@@ -2186,9 +2244,6 @@ class _DiceSheetState extends State<_DiceSheet>
     final scheme = Theme.of(context).colorScheme;
     final roll = session.lastRoll;
     final turnPlayer = session.currentTurnPlayer;
-
-    final die1 = _rolling ? _spin1 : roll?.die1 ?? 0;
-    final die2 = _rolling ? _spin2 : roll?.die2 ?? 0;
 
     final String label;
     if (_rolling) {
@@ -2208,30 +2263,7 @@ class _DiceSheetState extends State<_DiceSheet>
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                AnimatedBuilder(
-                  animation: _shake,
-                  builder: (context, child) => Transform.rotate(
-                    angle: (_shake.value - 0.5) * 0.18,
-                    child: child,
-                  ),
-                  child: _Die(value: die1, rolling: _rolling),
-                ),
-                const SizedBox(width: 20),
-                AnimatedBuilder(
-                  animation: _shake,
-                  // Opposite phase from die 1 so the pair wobbles against
-                  // each other rather than reading as one rigid block.
-                  builder: (context, child) => Transform.rotate(
-                    angle: (0.5 - _shake.value) * 0.18,
-                    child: child,
-                  ),
-                  child: _Die(value: die2, rolling: _rolling),
-                ),
-              ],
-            ),
+            _AnimatedDice(rolling: _rolling),
             const SizedBox(height: 16),
             Text(
               label,
@@ -2265,7 +2297,7 @@ class _DiceSheetState extends State<_DiceSheet>
 }
 
 class _Die extends StatelessWidget {
-  const _Die({required this.value, this.rolling = false});
+  const _Die({required this.value, this.rolling = false, this.size = 84});
 
   final int value;
 
@@ -2273,9 +2305,14 @@ class _Die extends StatelessWidget {
   /// bouncier one for the final settle.
   final bool rolling;
 
+  /// Side length — scaled down for the compact, inline die shown in the
+  /// board sheet's center controls versus the big modal dice sheet.
+  final double size;
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final pipSize = size * (13 / 84);
 
     // Pip layout per face on a 3x3 grid.
     const pips = <int, List<int>>{
@@ -2288,12 +2325,12 @@ class _Die extends StatelessWidget {
     };
 
     return Container(
-      width: 84,
-      height: 84,
-      padding: const EdgeInsets.all(12),
+      width: size,
+      height: size,
+      padding: EdgeInsets.all(size * (12 / 84)),
       decoration: BoxDecoration(
         gradient: AppColors.heroGradient,
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(size * (18 / 84)),
         boxShadow: [
           BoxShadow(
             color: scheme.shadow.withValues(alpha: 0.25),
@@ -2327,8 +2364,8 @@ class _Die extends StatelessWidget {
               Center(
                 child: (pips[value] ?? const []).contains(i)
                     ? Container(
-                        width: 13,
-                        height: 13,
+                        width: pipSize,
+                        height: pipSize,
                         decoration: const BoxDecoration(
                           color: Colors.white,
                           shape: BoxShape.circle,
@@ -2341,6 +2378,148 @@ class _Die extends StatelessWidget {
       ),
     );
   }
+}
+
+/// The two dice, tumbling and wobbling while [rolling] and settling on
+/// [GameProvider.lastRoll] once it flips back — purely reactive to that
+/// flag (it doesn't call [GameProvider.rollDice] itself), so it looks and
+/// behaves the same wherever it's shown: the modal dice sheet
+/// ([_DiceSheetState], which owns the roll trigger) and the board sheet's
+/// center controls ([_BoardCenterControlsState], which owns its own).
+class _AnimatedDice extends StatefulWidget {
+  const _AnimatedDice({
+    required this.rolling,
+    this.dieSize = 84,
+    this.spacing = 20,
+  });
+
+  final bool rolling;
+  final double dieSize;
+  final double spacing;
+
+  @override
+  State<_AnimatedDice> createState() => _AnimatedDiceState();
+}
+
+class _AnimatedDiceState extends State<_AnimatedDice>
+    with SingleTickerProviderStateMixin {
+  final _random = Random();
+  Timer? _spinner;
+  int _spin1 = 1;
+  int _spin2 = 4;
+
+  // A back-and-forth wobble while the dice are tumbling — 0.5 is "level",
+  // so animating back to it on landing (with an elastic curve) reads as a
+  // little bounce as the dice settle on their result.
+  late final _shake = AnimationController(
+    vsync: this,
+    value: 0.5,
+    duration: const Duration(milliseconds: 260),
+  );
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.rolling) _startSpin();
+  }
+
+  @override
+  void didUpdateWidget(covariant _AnimatedDice oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.rolling && !oldWidget.rolling) _startSpin();
+    if (!widget.rolling && oldWidget.rolling) _settle();
+  }
+
+  void _startSpin() {
+    _shake.repeat(reverse: true);
+    _spinner?.cancel();
+    // Shuffle the faces while the server decides the real result.
+    _spinner = Timer.periodic(const Duration(milliseconds: 70), (_) {
+      setState(() {
+        _spin1 = _random.nextInt(6) + 1;
+        _spin2 = _random.nextInt(6) + 1;
+      });
+    });
+  }
+
+  void _settle() {
+    _spinner?.cancel();
+    _spinner = null;
+    _shake
+      ..stop()
+      ..animateTo(
+        0.5,
+        curve: Curves.elasticOut,
+        duration: const Duration(milliseconds: 500),
+      );
+  }
+
+  @override
+  void dispose() {
+    _spinner?.cancel();
+    _shake.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final session = context.watch<GameProvider>();
+    final roll = session.lastRoll;
+    final die1 = widget.rolling ? _spin1 : roll?.die1 ?? 0;
+    final die2 = widget.rolling ? _spin2 : roll?.die2 ?? 0;
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        AnimatedBuilder(
+          animation: _shake,
+          builder: (context, child) => Transform.rotate(
+            angle: (_shake.value - 0.5) * 0.18,
+            child: child,
+          ),
+          child: _Die(value: die1, rolling: widget.rolling, size: widget.dieSize),
+        ),
+        SizedBox(width: widget.spacing),
+        AnimatedBuilder(
+          animation: _shake,
+          // Opposite phase from die 1 so the pair wobbles against each
+          // other rather than reading as one rigid block.
+          builder: (context, child) => Transform.rotate(
+            angle: (0.5 - _shake.value) * 0.18,
+            child: child,
+          ),
+          child: _Die(value: die2, rolling: widget.rolling, size: widget.dieSize),
+        ),
+      ],
+    );
+  }
+}
+
+/// However long the actual roll takes end to end (a host talking to its
+/// own client over 127.0.0.1 can resolve in a handful of milliseconds —
+/// faster than even one 70ms shuffle tick), the tumble stays on screen at
+/// least this long, so it always reads as a roll rather than an instant
+/// swap to the result.
+const _minRollAnimation = Duration(milliseconds: 700);
+
+/// Calls [GameProvider.rollDice], toggling [setRolling] around the request
+/// (padded out to [_minRollAnimation]) and surfacing a failure via a
+/// snackbar — shared by [_DiceSheetState] and [_BoardCenterControlsState]
+/// so a roll behaves identically no matter which one triggered it; each
+/// just animates it ([_AnimatedDice]) in its own spot.
+Future<void> _performRoll(
+  BuildContext context,
+  GameProvider session,
+  void Function(bool rolling) setRolling,
+) async {
+  setRolling(true);
+  final stopwatch = Stopwatch()..start();
+  final result = await session.rollDice();
+  final remaining = _minRollAnimation - stopwatch.elapsed;
+  if (remaining > Duration.zero) await Future<void>.delayed(remaining);
+  setRolling(false);
+  if (!result.isOk && context.mounted) showSnack(context, result.error!);
 }
 
 /// Another player asked me for money — shown as a dialog so it reaches the
