@@ -62,6 +62,7 @@ class _GameScreenState extends State<GameScreen> {
   StreamSubscription<Player>? _playerJoinSub;
   StreamSubscription<JailEvent>? _jailEntrySub;
   StreamSubscription<OtherTransactionEvent>? _otherTxSub;
+  StreamSubscription<String>? _turnStartSub;
   final _nfc = NfcService.instance;
   bool _nfcAvailable = false;
   GameProvider? _session;
@@ -88,17 +89,19 @@ class _GameScreenState extends State<GameScreen> {
   // un-rolls the turn the instant a double lands, well before this local
   // reveal sequence finishes — without this, "Roll dice" re-enables that
   // same instant and a fast tap can fire the bonus roll before the player
-  // ever sees the property sheet for the throw that just landed.
-  int _pendingRollUi = 0;
+  // ever sees the property sheet for the throw that just landed. A
+  // ValueNotifier (not a plain field + setState) so the board sheet's own
+  // roll button — a separate widget subtree — can react to it too.
+  final _pendingRollUi = ValueNotifier<int>(0);
 
   void _enqueueRollUi(FutureOr<void> Function() action) {
-    if (mounted) setState(() => _pendingRollUi++);
+    _pendingRollUi.value++;
     _rollUiChain = _rollUiChain.then((_) async {
       if (!mounted) return;
       try {
         await action();
       } finally {
-        if (mounted) setState(() => _pendingRollUi--);
+        _pendingRollUi.value--;
       }
     });
   }
@@ -209,6 +212,23 @@ class _GameScreenState extends State<GameScreen> {
           _enqueueRollUi(_afterRollReveal);
         }
       }
+    });
+    // The turn just handed over to someone — flag it specifically to that
+    // player, wherever they're looking, in case they've got some other
+    // screen open and would otherwise miss the roll button going live.
+    _turnStartSub = session.turnStarts.listen((playerId) {
+      if (!mounted) return;
+      final session = _session;
+      if (session == null || playerId != session.myPlayerId) return;
+      showActivityBanner(
+        context,
+        const ActivityBannerData(
+          icon: Icons.casino_rounded,
+          tone: BannerTone.neutral,
+          title: "It's your turn",
+          meta: 'Roll the dice to get started.',
+        ),
+      );
     });
     // Someone handed a property directly to another player (not a
     // landing/buy). The recipient gets a full dialog, same as an incoming
@@ -515,8 +535,10 @@ class _GameScreenState extends State<GameScreen> {
     _playerJoinSub?.cancel();
     _jailEntrySub?.cancel();
     _otherTxSub?.cancel();
+    _turnStartSub?.cancel();
     _session?.removeListener(_maybeShowRequestDialog);
     _nfc.stopWatch();
+    _pendingRollUi.dispose();
     super.dispose();
   }
 
@@ -563,6 +585,8 @@ class _GameScreenState extends State<GameScreen> {
         return _BoardSheet(
           onClose: () => Navigator.of(sheetContext).pop(),
           nfcAvailable: _nfcAvailable,
+          onRoll: _rollDice,
+          pendingRollUi: _pendingRollUi,
         );
       },
     );
@@ -1533,23 +1557,26 @@ class _GameScreenState extends State<GameScreen> {
         Row(
           children: [
             Expanded(
-              child: FilledButton.icon(
-                style: FilledButton.styleFrom(
-                  minimumSize: const Size(0, 48),
-                ),
-                onPressed: session.canRoll && _pendingRollUi == 0
-                    ? _rollDice
-                    : null,
-                icon: const Icon(Icons.casino_rounded),
-                label: Text(
-                  session.turnRolled
-                      ? 'Rolled ${session.lastRoll?.total ?? ''}'
-                      // A double by me with the turn still un-rolled
-                      // means the server granted another throw.
-                      : session.lastRoll?.isDouble == true &&
-                            session.lastRoll?.playerId == session.myPlayerId
-                      ? 'Double — roll again'
-                      : 'Roll dice',
+              child: ValueListenableBuilder<int>(
+                valueListenable: _pendingRollUi,
+                builder: (context, pendingRollUi, _) => FilledButton.icon(
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size(0, 48),
+                  ),
+                  onPressed: session.canRoll && pendingRollUi == 0
+                      ? _rollDice
+                      : null,
+                  icon: const Icon(Icons.casino_rounded),
+                  label: Text(
+                    session.turnRolled
+                        ? 'Rolled ${session.lastRoll?.total ?? ''}'
+                        // A double by me with the turn still un-rolled
+                        // means the server granted another throw.
+                        : session.lastRoll?.isDouble == true &&
+                              session.lastRoll?.playerId == session.myPlayerId
+                        ? 'Double — roll again'
+                        : 'Roll dice',
+                  ),
                 ),
               ),
             ),
@@ -1816,12 +1843,26 @@ class _GameScreenState extends State<GameScreen> {
 /// A compact modal panel showing the board and every token — pops up
 /// automatically on any roll (see `_diceRollSub` in [_GameScreenState]) and
 /// toggles via the app-bar button. Dismissible like any other sheet (its
-/// own close button, a drag, or tapping outside).
+/// own close button, a drag, or tapping outside). On my own turn it also
+/// carries its own Roll/End turn row, so acting on a roll doesn't require
+/// closing the board first to reach those buttons on the main screen.
 class _BoardSheet extends StatelessWidget {
-  const _BoardSheet({required this.onClose, required this.nfcAvailable});
+  const _BoardSheet({
+    required this.onClose,
+    required this.nfcAvailable,
+    required this.onRoll,
+    required this.pendingRollUi,
+  });
 
   final VoidCallback onClose;
   final bool nfcAvailable;
+  final VoidCallback onRoll;
+
+  /// Mirrors [_GameScreenState._pendingRollUi] — disables Roll while my own
+  /// previous roll's reveal (dice sheet, board popup, landed-property sheet)
+  /// is still working through the queue, same guard the main screen's own
+  /// Roll button already relies on.
+  final ValueNotifier<int> pendingRollUi;
 
   @override
   Widget build(BuildContext context) {
@@ -1881,6 +1922,47 @@ class _BoardSheet extends StatelessWidget {
                 ),
               ),
             ),
+            if (session.isMyTurn) ...[
+              const SizedBox(height: 14),
+              Row(
+                children: [
+                  Expanded(
+                    child: ValueListenableBuilder<int>(
+                      valueListenable: pendingRollUi,
+                      builder: (context, pending, _) => FilledButton.icon(
+                        style: FilledButton.styleFrom(
+                          minimumSize: const Size(0, 44),
+                        ),
+                        onPressed: session.canRoll && pending == 0
+                            ? onRoll
+                            : null,
+                        icon: const Icon(Icons.casino_rounded),
+                        label: Text(
+                          session.turnRolled
+                              ? 'Rolled ${session.lastRoll?.total ?? ''}'
+                              : session.lastRoll?.isDouble == true &&
+                                    session.lastRoll?.playerId ==
+                                        session.myPlayerId
+                              ? 'Double — roll again'
+                              : 'Roll dice',
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: FilledButton.tonalIcon(
+                      style: FilledButton.styleFrom(
+                        minimumSize: const Size(0, 44),
+                      ),
+                      onPressed: session.canEndTurn ? session.endTurn : null,
+                      icon: const Icon(Icons.skip_next_rounded),
+                      label: const Text('End turn'),
+                    ),
+                  ),
+                ],
+              ),
+            ],
           ],
         ),
       ),
@@ -1935,12 +2017,22 @@ class _DiceSheet extends StatefulWidget {
   State<_DiceSheet> createState() => _DiceSheetState();
 }
 
-class _DiceSheetState extends State<_DiceSheet> {
+class _DiceSheetState extends State<_DiceSheet>
+    with SingleTickerProviderStateMixin {
   final _random = Random();
   Timer? _spinner;
   bool _rolling = false;
   int _spin1 = 1;
   int _spin2 = 4;
+
+  // A back-and-forth wobble while the dice are tumbling — 0.5 is "level",
+  // so animating back to it on landing (with an elastic curve) reads as a
+  // little bounce as the dice settle on their result.
+  late final _shake = AnimationController(
+    vsync: this,
+    value: 0.5,
+    duration: const Duration(milliseconds: 260),
+  );
 
   @override
   void initState() {
@@ -1955,12 +2047,14 @@ class _DiceSheetState extends State<_DiceSheet> {
   @override
   void dispose() {
     _spinner?.cancel();
+    _shake.dispose();
     super.dispose();
   }
 
   Future<void> _roll(GameProvider session) async {
     if (_rolling) return;
     setState(() => _rolling = true);
+    _shake.repeat(reverse: true);
     // Shuffle the faces while the server decides the real result.
     _spinner = Timer.periodic(const Duration(milliseconds: 70), (_) {
       setState(() {
@@ -1972,6 +2066,13 @@ class _DiceSheetState extends State<_DiceSheet> {
     _spinner?.cancel();
     if (!mounted) return;
     setState(() => _rolling = false);
+    _shake
+      ..stop()
+      ..animateTo(
+        0.5,
+        curve: Curves.elasticOut,
+        duration: const Duration(milliseconds: 500),
+      );
     if (!result.isOk) {
       showSnack(context, result.error!);
     }
@@ -2009,9 +2110,25 @@ class _DiceSheetState extends State<_DiceSheet> {
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                _Die(value: die1),
+                AnimatedBuilder(
+                  animation: _shake,
+                  builder: (context, child) => Transform.rotate(
+                    angle: (_shake.value - 0.5) * 0.18,
+                    child: child,
+                  ),
+                  child: _Die(value: die1, rolling: _rolling),
+                ),
                 const SizedBox(width: 20),
-                _Die(value: die2),
+                AnimatedBuilder(
+                  animation: _shake,
+                  // Opposite phase from die 1 so the pair wobbles against
+                  // each other rather than reading as one rigid block.
+                  builder: (context, child) => Transform.rotate(
+                    angle: (0.5 - _shake.value) * 0.18,
+                    child: child,
+                  ),
+                  child: _Die(value: die2, rolling: _rolling),
+                ),
               ],
             ),
             const SizedBox(height: 16),
@@ -2047,9 +2164,13 @@ class _DiceSheetState extends State<_DiceSheet> {
 }
 
 class _Die extends StatelessWidget {
-  const _Die({required this.value});
+  const _Die({required this.value, this.rolling = false});
 
   final int value;
+
+  /// Faster face-to-face transitions while tumbling; a slightly longer,
+  /// bouncier one for the final settle.
+  final bool rolling;
 
   @override
   Widget build(BuildContext context) {
@@ -2080,24 +2201,42 @@ class _Die extends StatelessWidget {
           ),
         ],
       ),
-      child: GridView.count(
-        crossAxisCount: 3,
-        physics: const NeverScrollableScrollPhysics(),
-        children: [
-          for (var i = 0; i < 9; i++)
-            Center(
-              child: (pips[value] ?? const []).contains(i)
-                  ? Container(
-                      width: 13,
-                      height: 13,
-                      decoration: const BoxDecoration(
-                        color: Colors.white,
-                        shape: BoxShape.circle,
-                      ),
-                    )
-                  : const SizedBox.shrink(),
-            ),
-        ],
+      // Keyed by value: every face change (rapid while tumbling, once on
+      // landing) pops the new face in with a little scale-and-twist rather
+      // than swapping instantly.
+      child: AnimatedSwitcher(
+        duration: Duration(milliseconds: rolling ? 70 : 240),
+        switchInCurve: rolling ? Curves.easeOut : Curves.easeOutBack,
+        transitionBuilder: (child, animation) => ScaleTransition(
+          scale: animation,
+          child: RotationTransition(
+            turns: Tween<double>(
+              begin: 0.08,
+              end: 0,
+            ).animate(animation),
+            child: child,
+          ),
+        ),
+        child: GridView.count(
+          key: ValueKey(value),
+          crossAxisCount: 3,
+          physics: const NeverScrollableScrollPhysics(),
+          children: [
+            for (var i = 0; i < 9; i++)
+              Center(
+                child: (pips[value] ?? const []).contains(i)
+                    ? Container(
+                        width: 13,
+                        height: 13,
+                        decoration: const BoxDecoration(
+                          color: Colors.white,
+                          shape: BoxShape.circle,
+                        ),
+                      )
+                    : const SizedBox.shrink(),
+              ),
+          ],
+        ),
       ),
     );
   }

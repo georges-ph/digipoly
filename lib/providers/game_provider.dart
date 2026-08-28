@@ -143,6 +143,7 @@ class GameProvider extends ChangeNotifier {
   final _otherTransactions =
       StreamController<OtherTransactionEvent>.broadcast();
   final _rollDismissals = StreamController<String>.broadcast();
+  final _turnStarts = StreamController<String>.broadcast();
 
   /// Every drawId a `rollDismissed` broadcast has already arrived for.
   /// `rollDismissals` alone isn't enough to wait on: it's a live stream, so
@@ -179,6 +180,12 @@ class GameProvider extends ChangeNotifier {
   /// check this before waiting on [rollDismissals] for it, since the
   /// stream itself won't replay an event that already fired.
   bool wasDismissed(String drawId) => _dismissedDraws.contains(drawId);
+
+  /// Fires with a player id whenever the turn actually hands over to them
+  /// (not on a snapshot/resume catch-up) — lets a device flag "it's your
+  /// turn" wherever that player is looking, even if they've got some other
+  /// screen open and would otherwise miss the roll button becoming live.
+  Stream<String> get turnStarts => _turnStarts.stream;
 
   /// Every property handed from one player to another — the recipient's
   /// device uses this to pop up a "you were given X" notice.
@@ -1192,6 +1199,8 @@ class GameProvider extends ChangeNotifier {
             freeParkingPot: _freeParkingPot,
           );
         }
+        final startedId = _currentTurnId;
+        if (startedId != null) _turnStarts.add(startedId);
         notifyListeners();
       case MessageType.playerJoined:
         final json = message.payload['player'] as Map<String, dynamic>?;
@@ -1492,6 +1501,7 @@ class GameProvider extends ChangeNotifier {
     _jailEntries.close();
     _otherTransactions.close();
     _rollDismissals.close();
+    _turnStarts.close();
     super.dispose();
   }
 }

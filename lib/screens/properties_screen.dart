@@ -224,7 +224,10 @@ class _PropertyTile extends StatelessWidget {
         property.name,
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
-        style: textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.w700),
+        style: textTheme.bodyLarge?.copyWith(
+          fontWeight: FontWeight.w700,
+          fontSize: (textTheme.bodyLarge?.fontSize ?? 16) + 1.5,
+        ),
       ),
       subtitle: ownership != null && ownership!.mortgaged
           ? Text(
