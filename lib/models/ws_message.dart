@@ -55,6 +55,7 @@ enum MessageType {
   gameClosed,
   auctionStarted,
   auctionBid,
+  auctionClosing,
   auctionClosed,
   auctionRejected,
   rollDismissed,

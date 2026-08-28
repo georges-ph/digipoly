@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -8,9 +10,13 @@ import '../utils/formatting.dart';
 
 /// One live, table-held auction: current bid, who's leading, a quick bid
 /// box, and a close button anyone at the table can press to settle it —
-/// sells to the top bidder, or cancels if nobody bid. Shared by the game
-/// screen, the dashboard and the property sheet, so everyone sees the same
-/// live state no matter where they're looking.
+/// sells to the top bidder, or cancels if nobody bid. Closing doesn't
+/// settle instantly: it starts a brief, table-wide countdown
+/// ([PropertyAuction.closingAt]) so a bid that's mid-flight has a real
+/// chance to land instead of losing a race to a close that happened to
+/// arrive first — bidding during the countdown cancels it. Shared by the
+/// game screen, the dashboard and the property sheet, so everyone sees the
+/// same live state no matter where they're looking.
 class AuctionCard extends StatefulWidget {
   const AuctionCard({super.key, required this.auction});
 
@@ -24,6 +30,10 @@ class _AuctionCardState extends State<AuctionCard> {
   final _controller = TextEditingController();
   final _focusNode = FocusNode();
   String? _error;
+
+  /// Ticks a rebuild while a close is pending so the countdown text stays
+  /// live — only runs while [PropertyAuction.closingAt] is actually set.
+  Timer? _countdownTicker;
 
   @override
   void initState() {
@@ -43,10 +53,32 @@ class _AuctionCardState extends State<AuctionCard> {
         }
       });
     });
+    _syncCountdownTicker();
+  }
+
+  @override
+  void didUpdateWidget(covariant AuctionCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _syncCountdownTicker();
+  }
+
+  void _syncCountdownTicker() {
+    final closing = widget.auction.closingAt != null;
+    if (closing && _countdownTicker == null) {
+      _countdownTicker = Timer.periodic(const Duration(milliseconds: 200), (
+        _,
+      ) {
+        if (mounted) setState(() {});
+      });
+    } else if (!closing && _countdownTicker != null) {
+      _countdownTicker!.cancel();
+      _countdownTicker = null;
+    }
   }
 
   @override
   void dispose() {
+    _countdownTicker?.cancel();
     _controller.dispose();
     _focusNode.dispose();
     super.dispose();
@@ -75,7 +107,8 @@ class _AuctionCardState extends State<AuctionCard> {
   /// Closing sells the property (or cancels it) for good, so it always asks
   /// first — and calls out explicitly when the person closing is also the
   /// one about to win, since that's exactly the "bid low, close to myself"
-  /// move that shouldn't happen silently.
+  /// move that shouldn't happen silently. Confirming doesn't settle it right
+  /// away, though — it starts a brief countdown anyone can still bid through.
   Future<void> _confirmClose(
     GameProvider session, {
     required String? bidderId,
@@ -92,10 +125,12 @@ class _AuctionCardState extends State<AuctionCard> {
         ),
         content: Text(
           bidderId == null
-              ? 'Nobody has bid — the property stays unowned.'
+              ? 'Nobody has bid — the property stays unowned. A last-second '
+                    'bid still gets a few seconds to come in first.'
               : 'Sell for ${formatMoney(auction.currentBid, currency)} to '
                     '$bidderName?'
-                    '${sellingToSelf ? ' You are the only bidder.' : ''}',
+                    '${sellingToSelf ? ' You are the only bidder.' : ''} '
+                    'A higher bid can still come in during a short countdown.',
         ),
         actions: [
           // A plain TextButton next to a FilledButton reads as two
@@ -188,6 +223,10 @@ class _AuctionCardState extends State<AuctionCard> {
               color: iAmLeading ? AppColors.income : null,
             ),
           ),
+          if (auction.closingAt != null) ...[
+            const SizedBox(height: 8),
+            _ClosingCountdown(closingAt: auction.closingAt!),
+          ],
           if (!session.isSpectating) ...[
             const SizedBox(height: 10),
             Row(
@@ -238,33 +277,79 @@ class _AuctionCardState extends State<AuctionCard> {
                 style: textTheme.bodySmall?.copyWith(color: AppColors.expense),
               ),
             ],
-            Align(
-              alignment: Alignment.centerRight,
-              child: TextButton(
-                // The leading bidder can't close their own auction — that
-                // would let them bid low once and sell it to themselves
-                // before anyone else gets a chance. Someone else at the
-                // table has to close it (the server enforces this too).
-                onPressed: iAmLeading
-                    ? null
-                    : () => _confirmClose(
-                        session,
-                        bidderId: bidderId,
-                        bidderName: bidderName,
-                        currency: board.currencySymbol,
-                      ),
-                child: Text(
-                  bidderId == null
-                      ? 'Cancel auction'
-                      : iAmLeading
-                      ? "You're leading — someone else can close this"
-                      : 'Close — sell to $bidderName',
+            // Once a close is already counting down, a second request is a
+            // no-op server-side — hide the button rather than let it invite
+            // a confusing repeat tap.
+            if (auction.closingAt == null)
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton(
+                  // The leading bidder can't close their own auction —
+                  // that would let them bid low once and sell it to
+                  // themselves before anyone else gets a chance. Someone
+                  // else at the table has to close it (the server enforces
+                  // this too).
+                  onPressed: iAmLeading
+                      ? null
+                      : () => _confirmClose(
+                          session,
+                          bidderId: bidderId,
+                          bidderName: bidderName,
+                          currency: board.currencySymbol,
+                        ),
+                  child: Text(
+                    bidderId == null
+                        ? 'Cancel auction'
+                        : iAmLeading
+                        ? "You're leading — someone else can close this"
+                        : 'Close — sell to $bidderName',
+                  ),
                 ),
               ),
-            ),
           ],
         ],
       ),
+    );
+  }
+}
+
+/// A live "closing in Ns" readout for a pending close — ticks down to zero
+/// off the shared, server-set [closingAt] timestamp (not a locally-started
+/// timer), so every device counts down the same window regardless of when
+/// its own auctionClosing broadcast happened to arrive.
+class _ClosingCountdown extends StatelessWidget {
+  const _ClosingCountdown({required this.closingAt});
+
+  final DateTime closingAt;
+
+  @override
+  Widget build(BuildContext context) {
+    final remaining = closingAt.difference(DateTime.now());
+    final seconds = (remaining.inMilliseconds / 1000).ceil().clamp(0, 999);
+    final textTheme = Theme.of(context).textTheme;
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const SizedBox(
+          width: 14,
+          height: 14,
+          child: CircularProgressIndicator(
+            strokeWidth: 2,
+            color: AppColors.expense,
+          ),
+        ),
+        const SizedBox(width: 8),
+        Text(
+          seconds > 0
+              ? 'Closing in ${seconds}s — bid now to keep it open'
+              : 'Closing…',
+          style: textTheme.bodySmall?.copyWith(
+            color: AppColors.expense,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ],
     );
   }
 }

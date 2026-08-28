@@ -149,12 +149,28 @@ board — boards with different names/currencies/properties must all work.
   check): with no guard, anyone could start an auction, bid low once, and
   immediately sell it to themselves before anyone else had a chance to
   bid. Someone else at the table has to close it (cancelling with no bids
-  at all is still open to anyone, including the starter). State lives
-  server-side only (`GameServer._auctions`, `PropertyAuction` model) — not
-  persisted to the DB, but replayed to (re)connecting clients via the
-  snapshot, so a table restart or reconnect doesn't need to restart
-  mid-auction. Wire: `startAuction`/`placeBid`/`closeAuction` intents,
-  `auctionStarted`/`auctionBid`/`auctionClosed`/`auctionRejected` events.
+  at all is still open to anyone, including the starter). Closing doesn't
+  settle instantly: it starts a brief, table-wide 3s countdown
+  (`GameServer._auctionCloseGrace`, `PropertyAuction.closingAt`, rendered
+  as a live "Closing in Ns" readout by `AuctionCard`'s `_ClosingCountdown`)
+  — like an auctioneer's "going once, going twice" — so a bid that's
+  mid-flight has a real chance to land rather than losing a race to a
+  close that happened to arrive at the server first; any bid placed during
+  the window cancels it (`_handlePlaceBid` clears `closingAt` and cancels
+  the pending timer) and the auction stays open. A second close request
+  while one's already counting down is a no-op rather than restarting the
+  clock, and the bidder-self-check happens before the countdown starts, not
+  after — a would-be self-sale is rejected immediately rather than left to
+  expire. State lives server-side only (`GameServer._auctions`,
+  `PropertyAuction` model) — not persisted to the DB, but replayed to
+  (re)connecting clients via the snapshot, so a table restart or reconnect
+  doesn't need to restart mid-auction (a restart mid-countdown, however,
+  drops the pending close along with the rest of the in-memory auction
+  state — same tradeoff). Wire: `startAuction`/`placeBid`/`closeAuction`
+  intents, `auctionStarted`/`auctionBid`/`auctionClosing`/`auctionClosed`/
+  `auctionRejected` events — `auctionClosing` and `auctionBid` share the
+  same `{auction: ...}` shape, so either one landing on a client just
+  replaces its cached `PropertyAuction` wholesale.
 - **Trades (property transfer)**: the owner hands a deed to another player
   from the property sheet ("Transfer to another player" → pick → confirm).
   No money moves — the deal's cash is a normal Send; buildings on the
@@ -413,7 +429,9 @@ turnRolled + full player list, since a curated-layout board also moves
 tokens on every roll + freeParkingPot), `cardDrawn` (+ full player list,
 since a "go to X"/jail card can move or grant a card to the drawer), `turnChanged`,
 `playerJoined`, `playerLeft`, `presenceChanged`, `gameClosed`,
-`auctionStarted`/`auctionBid` (auction state), `auctionClosed`
+`auctionStarted`/`auctionBid`/`auctionClosing` (auction state —
+`auctionClosing` carries the same shape, just with `closingAt` set, once a
+close starts counting down), `auctionClosed`
 (propertyId + winnerId/amount, or cancelled + reason), `auctionRejected`
 (sent only to the sender — bid too low, can't afford it, etc), `rollDismissed`
 (playerId + drawId — a pure relay of `dismissRoll`; keyed by drawId, not

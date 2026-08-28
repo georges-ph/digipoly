@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
@@ -48,6 +49,12 @@ class GameServer {
   final Map<String, PropertyOwnership> _ownerships = {};
   final Map<String, MoneyRequest> _pendingRequests = {};
   final Map<String, PropertyAuction> _auctions = {};
+
+  /// One pending-close timer per auction currently counting down — see
+  /// [_handleCloseAuction]. Not persisted (auctions themselves aren't
+  /// either): a host restart mid-countdown just drops it, same tradeoff.
+  static const _auctionCloseGrace = Duration(seconds: 3);
+  final Map<String, Timer> _auctionCloseTimers = {};
   String? _currentTurnId;
   DiceRoll? _lastRoll;
   bool _turnRolled = false;
@@ -115,6 +122,10 @@ class GameServer {
       ..addEntries(ownerships.map((o) => MapEntry(o.propertyId, o)));
     _pendingRequests.clear();
     _auctions.clear();
+    for (final timer in _auctionCloseTimers.values) {
+      timer.cancel();
+    }
+    _auctionCloseTimers.clear();
     _spectators.clear();
     _chanceDeck.clear();
     _chestDeck.clear();
@@ -182,6 +193,10 @@ class GameServer {
       channel.sink.close();
     }
     _spectators.clear();
+    for (final timer in _auctionCloseTimers.values) {
+      timer.cancel();
+    }
+    _auctionCloseTimers.clear();
     await _http?.close(force: true);
     _http = null;
     _game = null;
@@ -813,9 +828,15 @@ class GameServer {
       return;
     }
 
+    // A bid arriving while a close is pending beats it to the punch — the
+    // whole point of the grace window is to give exactly this a chance to
+    // land instead of losing the race to a close that was already in
+    // flight.
+    _auctionCloseTimers.remove(propertyId)?.cancel();
     final updated = auction.copyWith(
       currentBid: amount,
       currentBidderId: senderId,
+      clearClosingAt: true,
     );
     _auctions[propertyId] = updated;
     _broadcast(
@@ -825,14 +846,59 @@ class GameServer {
     );
   }
 
-  /// Closes a running auction — anyone can, not just the one who started
-  /// it. Sells to the current top bidder at their bid, or cancels if
-  /// nobody bid (or the bid can no longer be honored).
+  /// Requests closing a running auction — anyone can, not just the one who
+  /// started it. Rather than settling immediately, this starts a short,
+  /// broadcast countdown (like an auctioneer's "going once, going twice…")
+  /// so a bid that's mid-flight has a real chance to land instead of losing
+  /// a race to a close that happened to arrive first; any bid placed during
+  /// the window cancels it (see [_handlePlaceBid]). Once the window elapses
+  /// undisturbed, [_finalizeAuctionClose] actually sells to the top bidder,
+  /// or cancels if nobody bid.
   void _handleCloseAuction(String senderId, Map<String, dynamic> payload) {
     final sender = _players[senderId];
     if (sender == null || sender.hasLeft) return;
 
     final propertyId = payload['propertyId'] as String? ?? '';
+    final auction = _auctions[propertyId];
+    if (auction == null) return;
+    // Already counting down — a second close request (from anyone) while
+    // one's already pending is a no-op rather than restarting the clock.
+    if (auction.closingAt != null) return;
+
+    // The leading bidder can't close their own auction — otherwise anyone
+    // could start one, bid low once, and immediately sell it to themselves
+    // before anybody else gets a chance to bid. Someone else at the table
+    // has to be the one to close it (cancelling with no bids is still fine
+    // for anyone).
+    if (auction.currentBidderId != null &&
+        senderId == auction.currentBidderId) {
+      _rejectAuction(
+        senderId,
+        propertyId,
+        'Someone else needs to close this — you\'re the leading bidder.',
+      );
+      return;
+    }
+
+    final closingAt = DateTime.now().add(_auctionCloseGrace);
+    final updated = auction.copyWith(closingAt: closingAt);
+    _auctions[propertyId] = updated;
+    _broadcast(
+      WsMessage(MessageType.auctionClosing, {
+        'auction': updated.toJson(),
+      }),
+    );
+    _auctionCloseTimers[propertyId] = Timer(_auctionCloseGrace, () {
+      _auctionCloseTimers.remove(propertyId);
+      _finalizeAuctionClose(propertyId);
+    });
+  }
+
+  /// Actually settles an auction once its close countdown has run out
+  /// undisturbed — sells to the current top bidder at their bid (re-checked
+  /// fresh, since balances can move during the grace window), or cancels if
+  /// nobody bid or the sale can no longer be honored.
+  void _finalizeAuctionClose(String propertyId) {
     final auction = _auctions.remove(propertyId);
     if (auction == null) return;
 
@@ -844,21 +910,6 @@ class GameServer {
           'propertyId': propertyId,
           'cancelled': true,
         }),
-      );
-      return;
-    }
-
-    // The leading bidder can't close their own auction — otherwise anyone
-    // could start one, bid low once, and immediately sell it to themselves
-    // before anybody else gets a chance to bid. Someone else at the table
-    // has to be the one to close it (cancelling with no bids is still fine
-    // for anyone, handled above).
-    if (senderId == bidderId) {
-      _auctions[propertyId] = auction;
-      _rejectAuction(
-        senderId,
-        propertyId,
-        'Someone else needs to close this — you\'re the leading bidder.',
       );
       return;
     }

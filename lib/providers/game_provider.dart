@@ -780,9 +780,12 @@ class GameProvider extends ChangeNotifier {
     }
   }
 
-  /// Closes a running auction — anyone can, not just whoever started it.
-  /// Sells to the current top bidder at their bid, or cancels if nobody
-  /// bid.
+  /// Requests closing a running auction — anyone can, not just whoever
+  /// started it. Doesn't settle immediately: the server starts a short,
+  /// broadcast countdown first (see [PropertyAuction.closingAt]) so an
+  /// in-flight bid has a real chance to land before it does. Sells to the
+  /// current top bidder at their bid once the countdown runs out
+  /// undisturbed, or cancels if nobody bid.
   void closeAuction(String propertyId) {
     if (_connection == ClientStatus.connected) {
       _client?.sendCloseAuction(propertyId);
@@ -1236,6 +1239,16 @@ class GameProvider extends ChangeNotifier {
           notifyListeners();
         }
       case MessageType.auctionBid:
+        final json = message.payload['auction'] as Map<String, dynamic>?;
+        if (json != null) {
+          final auction = PropertyAuction.fromJson(json);
+          _auctions[auction.propertyId] = auction;
+          notifyListeners();
+        }
+      case MessageType.auctionClosing:
+        // Carries the same auction with closingAt set — a live countdown
+        // every device renders from that timestamp (see AuctionCard). A new
+        // bid cancels it by broadcasting a normal auctionBid with it clear.
         final json = message.payload['auction'] as Map<String, dynamic>?;
         if (json != null) {
           final auction = PropertyAuction.fromJson(json);
