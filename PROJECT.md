@@ -229,7 +229,25 @@ board — boards with different names/currencies/properties must all work.
   anywhere in the app; accepting sends a normal validated payment carrying
   the requestId. Server rejects upfront if target can't afford it; auto-
   declines (notifying both sides) if the accepted payment fails; requester
-  backing out **withdraws** the request. Both sides' UI auto-dismisses.
+  backing out **withdraws** the request. Both sides' UI auto-dismisses. A
+  property's own sheet offers a **quiet, owner-only shortcut** onto this
+  same flow: if another player is currently standing on that square
+  (curated-layout boards only), a small "Request rent from ‹name›" text
+  button appears — there's no other way for the owner to even notice a
+  landing they didn't cause, since only the roller's own device
+  auto-opens a property sheet. It pushes the normal request screen
+  prefilled with that player and the computed rent (blank for an
+  unresolved utility roll), still editable before it sends
+  (`properties_screen.dart`'s `_requestRentFlow`, `SendMoneyScreen`'s new
+  `initialNote`) — nothing about it is a new wire message, it's just a
+  targeted entry point onto the request flow above. A settled request
+  also now reaches `GameProvider.paymentsReceived` (and so the arriving-
+  money activity banner) same as a plain payment/rent — it used to be
+  excluded there on the assumption the requester is still watching their
+  own request screen for its resolution, true for the generic Request
+  quick action but not for this shortcut, which is meant to be fired off
+  and left running while the requester goes back to the rest of the
+  table.
 - **Kick / Replace**: host-only moderation, from a player's long-press
   sheet. Kicking marks them `hasLeft` — same effect as leaving voluntarily,
   balance and properties frozen exactly as they were, no liquidation
@@ -598,7 +616,17 @@ Flat layout: `lib/screens`, `lib/widgets`, `lib/theme`, `lib/utils`.
   reopening the final-standings dialog once the host's called it (see End
   game above — replaces the roll/end-turn row entirely rather than merely
   disabling it, which would read as a bug), roll/end-turn row (only on my
-  turn, and only while the game hasn't ended), quick
+  turn, and only while the game hasn't ended — **End turn stays locked for
+  a few seconds right after a roll**: it sits right next to Roll dice and
+  would otherwise enable the instant a roll lands, before there's been any
+  chance to see what came up let alone buy/pay/build off it, so a stray
+  tap there could cost a whole turn with nothing to undo it.
+  `_GameScreenState._armEndTurnLock` restarts a 6s timer
+  (`_endTurnGrace`) on every roll of mine, including a bonus throw from
+  doubles, and disables the button (both this row's and
+  `_BoardCenterControls`' own) via a shared `ValueNotifier<bool>` until it
+  elapses — the same sharing pattern `_pendingRollUi` already uses for
+  Roll dice), quick
   actions (Send, Request, Scan & pay, Receive, Pass GO, Collect, Chance,
   Chest, Loan — Send/Collect/GO/Chance/Chest/Loan gated by `canResolve`,
   Request/Receive/Scan & pay never (see turn flow above); **Pass GO is
@@ -618,7 +646,14 @@ Flat layout: `lib/screens`, `lib/widgets`, `lib/theme`, `lib/utils`.
   every device sees every roll, so token movement is visible wherever a
   player is looking) if it isn't already open. It stays open until
   whoever's looking at it closes it (however they choose to) — no timer,
-  no auto-close on any device. For
+  no auto-close on any device. The ring's empty middle floats the
+  roll/end-turn controls (`_BoardCenterControls`) for whoever's turn it
+  is; everyone else watching the same popup gets the same tumbling/
+  wobbling dice there too, timed to the actual broadcast roll
+  (`_BoardCenterControlsState._onSpectatedRoll`, reactive only — it never
+  calls `rollDice` itself) rather than just a text activity banner, so a
+  roll reads as an actual dice roll wherever anyone's looking, not only
+  on the roller's own screen. For
   my own roll, the popup order is dice result → board (pops up and stays
   open) → a 2s pause → landed property's sheet on top of it
   (`_afterRollReveal`, chained on `_rollUiChain`), so the board actually
@@ -730,7 +765,10 @@ Flat layout: `lib/screens`, `lib/widgets`, `lib/theme`, `lib/utils`.
   balance, shared by game/dashboard/activity), `player_card_sheet` (debit-
   card styled, "Register a physical card"), `player_avatar` (presence dot,
   a gold Get Out of Jail Free badge when `Player.jailCards > 0`
-  (`showJailCard`, on by default — off for the small board tokens), and a
+  (`showJailCard`, on by default — off for the small board tokens) — the
+  badge shows the actual count as a numeral once someone's holding more
+  than one (rare, but possible via a trade or a card draw stacking on top
+  of a held one), and just the plain ticket icon for exactly one, and a
   highlight ring; color is keyed by **seat**, not a hash of the player id
   — `AppColors.avatarColorForSeat` — so two players at the same table
   never collide on a color, unlike the old id-hash scheme; the 8-color
@@ -831,7 +869,13 @@ Flat layout: `lib/screens`, `lib/widgets`, `lib/theme`, `lib/utils`.
   `main.dart` detects this by checking whether the page's own origin
   (`Uri.base`) is a plain-http LAN address rather than parsing query
   params for that — a `claim` param, if present, still rides along into
-  `WebJoinScreen`.
+  `WebJoinScreen`. The build runs with **`--no-web-resources-cdn`**: by
+  default `flutter build web` fetches CanvasKit (the web renderer's wasm
+  engine) from Google's CDN at runtime instead of bundling it, which
+  breaks the app's own LAN-only rule for exactly this join path — a device
+  with no internet route hangs trying to reach it. The flag bundles
+  CanvasKit into `build/web/canvaskit/` instead, so the join page never
+  needs a route off the LAN.
 - Web builds can't host (dart:io throws at runtime, guarded by kIsWeb) or
   use NFC/mDNS; sqlite works via the wasm worker files in `web/`.
 

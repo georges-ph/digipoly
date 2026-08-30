@@ -112,12 +112,12 @@ class _HostGameScreenState extends State<HostGameScreen> {
             ),
             const SizedBox(height: 10),
           ],
-        ],
-      ),
-      bottomNavigationBar: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
-          child: FilledButton.icon(
+          const SizedBox(height: 14),
+          // Part of the scrollable body, not a bottomNavigationBar: a
+          // bottomNavigationBar sits outside the area Scaffold resizes for
+          // the keyboard, so on Android it stayed hidden behind the
+          // keyboard while the game-name field was focused.
+          FilledButton.icon(
             onPressed: (_starting || selectedId == null) ? null : _start,
             icon: _starting
                 ? const SizedBox(
@@ -131,7 +131,7 @@ class _HostGameScreenState extends State<HostGameScreen> {
                 : const Icon(Icons.play_arrow_rounded),
             label: Text(_starting ? 'Starting room…' : 'Start room'),
           ),
-        ),
+        ],
       ),
     );
   }

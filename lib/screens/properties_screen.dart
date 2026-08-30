@@ -14,6 +14,7 @@ import '../utils/formatting.dart';
 import '../utils/snack.dart';
 import '../widgets/auction_card.dart';
 import '../widgets/player_avatar.dart';
+import 'send_money_screen.dart';
 
 /// Every property on the board with live ownership: buy, pay rent, build
 /// houses, and register physical NFC cards.
@@ -224,10 +225,7 @@ class _PropertyTile extends StatelessWidget {
         property.name,
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
-        style: textTheme.bodyLarge?.copyWith(
-          fontWeight: FontWeight.w700,
-          fontSize: (textTheme.bodyLarge?.fontSize ?? 16) + 3.5,
-        ),
+        style: textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.w700),
       ),
       subtitle: ownership != null && ownership!.mortgaged
           ? Text(
@@ -504,6 +502,30 @@ class _PropertySheetState extends State<_PropertySheet> {
       success: 'Collected rent from ${payer.name}',
       resolved: true,
     );
+  }
+
+  /// A subtle nudge for the owner: [payer] is standing on this property
+  /// (or was, last the owner checked) and may owe rent nobody's collected
+  /// yet. Opens the normal request-money flow prefilled, rather than
+  /// moving money directly — the payer still has to approve it, same as
+  /// any other money request.
+  Future<void> _requestRentFlow(Player payer, int? rentDue) async {
+    final property = context.read<GameProvider>().propertyById(
+      widget.propertyId,
+    );
+    final sent = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => SendMoneyScreen(
+          mode: SendMode.request,
+          initialRecipientId: payer.id,
+          initialAmount: rentDue ?? 0,
+          initialNote: property != null ? 'Rent for ${property.name}' : '',
+        ),
+      ),
+    );
+    if (sent == true && mounted) {
+      showSnack(context, 'Rent collected from ${payer.name}');
+    }
   }
 
   Future<void> _buyFlow() async {
@@ -1146,6 +1168,56 @@ class _PropertySheetState extends State<_PropertySheet> {
                       color: scheme.onSurfaceVariant,
                     ),
                   ),
+                ),
+              // A quiet nudge, only shown when it's actually useful:
+              // someone else is standing on this square right now (curated-
+              // layout boards only — there's no position to check without
+              // one) and might not have paid rent yet. Sends a normal money
+              // request rather than moving money directly, prefilled with
+              // the computed amount and still editable before it goes out.
+              if (isMine && board.goIndex >= 0)
+                Builder(
+                  builder: (context) {
+                    final propertyIndex = board.properties.indexOf(property);
+                    Player? standingPlayer;
+                    for (final p in session.otherActivePlayers) {
+                      if (p.position == propertyIndex) {
+                        standingPlayer = p;
+                        break;
+                      }
+                    }
+                    final payer = standingPlayer;
+                    if (payer == null) return const SizedBox.shrink();
+
+                    final theirRoll = session.lastRoll?.playerId == payer.id
+                        ? session.lastRoll
+                        : null;
+                    int? rentDue;
+                    if (property.kind != PropertyKind.utility ||
+                        theirRoll != null) {
+                      final rent = GameEngine.computeRent(
+                        board: board,
+                        ownerships: session.ownerships,
+                        propertyId: property.id,
+                        diceTotal: theirRoll?.total,
+                      );
+                      if (rent.isOk) rentDue = rent.requireValue;
+                    }
+
+                    return Padding(
+                      padding: const EdgeInsets.only(top: 10),
+                      child: Center(
+                        child: TextButton.icon(
+                          onPressed: () => _requestRentFlow(payer, rentDue),
+                          icon: const Icon(
+                            Icons.notifications_active_outlined,
+                            size: 18,
+                          ),
+                          label: Text('Request rent from ${payer.name}'),
+                        ),
+                      ),
+                    );
+                  },
                 ),
               // Mortgaging is a bank move like sends/collects: allowed the
               // whole turn. Hidden when the board defines no mortgage value.

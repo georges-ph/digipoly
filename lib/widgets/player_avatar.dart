@@ -109,11 +109,21 @@ class PlayerAvatar extends StatelessWidget {
                   ),
                 ),
                 alignment: Alignment.center,
-                child: Icon(
-                  Icons.confirmation_number_rounded,
-                  size: size * 0.2,
-                  color: Colors.black87,
-                ),
+                child: player.jailCards > 1
+                    ? Text(
+                        '${player.jailCards}',
+                        style: TextStyle(
+                          color: Colors.black87,
+                          fontWeight: FontWeight.w800,
+                          fontSize: size * 0.22,
+                          height: 1,
+                        ),
+                      )
+                    : Icon(
+                        Icons.confirmation_number_rounded,
+                        size: size * 0.2,
+                        color: Colors.black87,
+                      ),
               ),
             ),
         ],

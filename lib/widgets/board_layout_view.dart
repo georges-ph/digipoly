@@ -265,8 +265,14 @@ class _SquareTile extends StatelessWidget {
                   textAlign: TextAlign.center,
                   maxLines: 4,
                   overflow: TextOverflow.ellipsis,
+                  // Same nudge as the properties list's own title text: the
+                  // base labelSmall size read as too small to make out at a
+                  // glance. The FittedBox around this still scales it back
+                  // down on a tight square, so the bump only helps wherever
+                  // there's actually room for it.
                   style: textTheme.labelSmall?.copyWith(
-                    fontWeight: FontWeight.w700,
+                    fontWeight: FontWeight.w800,
+                    fontSize: (textTheme.labelSmall?.fontSize ?? 11) + 3,
                   ),
                 ),
               ),

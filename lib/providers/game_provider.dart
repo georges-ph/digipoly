@@ -1420,12 +1420,17 @@ class GameProvider extends ChangeNotifier {
       } else if (tx.toId == myPlayerId &&
           tx.fromId != Player.bankId &&
           (tx.type == TransactionType.payment ||
-              tx.type == TransactionType.rent)) {
-        // A direct payment or rent landing in my account — the two cases
-        // where money shows up without me having done anything myself, so
-        // there's nothing else already telling me it happened (unlike a
-        // card draw or a transfer, which already pop their own dialog for
-        // everyone involved).
+              tx.type == TransactionType.rent ||
+              tx.type == TransactionType.request)) {
+        // A direct payment, rent, or a settled money request landing in my
+        // account. A settled request used to be excluded here on the
+        // assumption the requester is still watching the request screen
+        // for its own "Request paid" resolution — true right after tapping
+        // the generic Request quick action, but not for the property
+        // sheet's "Request rent" shortcut, which is meant to be fired off
+        // and left running while the requester goes back to the rest of
+        // the table; without this, paid rent requested that way never
+        // surfaced anywhere once the requester moved on.
         _paymentsReceived.add((
           fromId: tx.fromId,
           amount: tx.amount,

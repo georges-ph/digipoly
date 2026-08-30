@@ -18,7 +18,12 @@ $zip = "assets/web/web_app.zip"
 # embedded into.
 if (Test-Path $zip) { Remove-Item $zip }
 
-flutter build web
+# --no-web-resources-cdn bundles CanvasKit (and other engine static assets)
+# into the build instead of the default behavior of fetching them from
+# Google's CDN at runtime — the LAN-only rule (see PROJECT.md) applies to
+# this web app too, and a device with no internet route would otherwise
+# hang trying to reach it.
+flutter build web --no-web-resources-cdn
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 New-Item -ItemType Directory -Force (Split-Path $zip) | Out-Null

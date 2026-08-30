@@ -66,7 +66,16 @@ class _LoanSheetState extends State<LoanSheet> {
 
     return SafeArea(
       child: SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(24, 20, 24, 24),
+        // The bottom inset grows with the keyboard: without it, the scroll
+        // viewport never shrinks for the keyboard, so the note field below
+        // just sits behind it once focused, same issue the property
+        // sheet's own AuctionCard bid field had.
+        padding: EdgeInsets.fromLTRB(
+          24,
+          20,
+          24,
+          24 + MediaQuery.of(context).viewInsets.bottom,
+        ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,

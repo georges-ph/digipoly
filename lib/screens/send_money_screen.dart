@@ -32,6 +32,7 @@ class SendMoneyScreen extends StatefulWidget {
     this.mode = SendMode.pay,
     this.initialRecipientId,
     this.initialAmount = 0,
+    this.initialNote = '',
     this.fromScannedCode = false,
   });
 
@@ -40,6 +41,9 @@ class SendMoneyScreen extends StatefulWidget {
 
   /// Prefilled amount (from a scanned payment QR); still editable.
   final int initialAmount;
+
+  /// Prefilled note (e.g. "Rent for Boardwalk"); still editable.
+  final String initialNote;
 
   /// Arrived here by scanning someone's payment QR rather than picking
   /// "Send" myself — functionally the same as being asked to pay via a
@@ -54,7 +58,7 @@ class SendMoneyScreen extends StatefulWidget {
 class _SendMoneyScreenState extends State<SendMoneyScreen> {
   late String _recipientId = widget.initialRecipientId ?? Player.bankId;
   late int _amount = widget.initialAmount;
-  final _noteController = TextEditingController();
+  late final _noteController = TextEditingController(text: widget.initialNote);
   bool _sending = false;
   bool _initializedRecipient = false;
   final _nfc = NfcService.instance;

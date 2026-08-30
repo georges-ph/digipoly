@@ -96,6 +96,23 @@ class _GameScreenState extends State<GameScreen> {
   // roll button — a separate widget subtree — can react to it too.
   final _pendingRollUi = ValueNotifier<int>(0);
 
+  // True for a short grace period right after my own roll lands — long
+  // enough to roll, see the board/property sheet come up, and act on it —
+  // so End turn (sitting right next to Roll dice) can't be fat-fingered
+  // the instant a roll settles. Restarts on every roll of mine, including
+  // a bonus throw from doubles. Same sharing reason as _pendingRollUi: the
+  // board sheet's own End turn button needs to see it too.
+  final _endTurnLocked = ValueNotifier<bool>(false);
+  Timer? _endTurnLockTimer;
+
+  void _armEndTurnLock() {
+    _endTurnLockTimer?.cancel();
+    _endTurnLocked.value = true;
+    _endTurnLockTimer = Timer(_endTurnGrace, () {
+      if (mounted) _endTurnLocked.value = false;
+    });
+  }
+
   void _enqueueRollUi(FutureOr<void> Function() action) {
     _pendingRollUi.value++;
     _rollUiChain = _rollUiChain.then((_) async {
@@ -208,6 +225,7 @@ class _GameScreenState extends State<GameScreen> {
       // Skipped when a card for this same roll already scheduled its own
       // check (see above) so the property sheet doesn't pop up twice.
       if (isMine) {
+        _armEndTurnLock();
         if (_cardHandledThisRoll) {
           _cardHandledThisRoll = false;
         } else {
@@ -548,6 +566,8 @@ class _GameScreenState extends State<GameScreen> {
     _session?.removeListener(_maybeShowRequestDialog);
     _nfc.stopWatch();
     _pendingRollUi.dispose();
+    _endTurnLockTimer?.cancel();
+    _endTurnLocked.dispose();
     super.dispose();
   }
 
@@ -595,6 +615,7 @@ class _GameScreenState extends State<GameScreen> {
           onClose: () => Navigator.of(sheetContext).pop(),
           nfcAvailable: _nfcAvailable,
           pendingRollUi: _pendingRollUi,
+          endTurnLocked: _endTurnLocked,
         );
       },
     );
@@ -1682,13 +1703,18 @@ class _GameScreenState extends State<GameScreen> {
             ),
             const SizedBox(width: 10),
             Expanded(
-              child: FilledButton.tonalIcon(
-                style: FilledButton.styleFrom(
-                  minimumSize: const Size(0, 48),
+              child: ValueListenableBuilder<bool>(
+                valueListenable: _endTurnLocked,
+                builder: (context, locked, _) => FilledButton.tonalIcon(
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size(0, 48),
+                  ),
+                  onPressed: session.canEndTurn && !locked
+                      ? session.endTurn
+                      : null,
+                  icon: const Icon(Icons.skip_next_rounded),
+                  label: const Text('End turn'),
                 ),
-                onPressed: session.canEndTurn ? session.endTurn : null,
-                icon: const Icon(Icons.skip_next_rounded),
-                label: const Text('End turn'),
               ),
             ),
           ],
@@ -1952,6 +1978,7 @@ class _BoardSheet extends StatelessWidget {
     required this.onClose,
     required this.nfcAvailable,
     required this.pendingRollUi,
+    required this.endTurnLocked,
   });
 
   final VoidCallback onClose;
@@ -1962,6 +1989,10 @@ class _BoardSheet extends StatelessWidget {
   /// is still working through the queue, same guard the main screen's own
   /// Roll button already relies on.
   final ValueNotifier<int> pendingRollUi;
+
+  /// Mirrors [_GameScreenState._endTurnLocked] — same grace-period guard on
+  /// End turn as the main screen's own button.
+  final ValueNotifier<bool> endTurnLocked;
 
   @override
   Widget build(BuildContext context) {
@@ -2031,7 +2062,7 @@ class _BoardSheet extends StatelessWidget {
                 // buttons are right where the token you're watching move
                 // just landed. FittedBox lets it shrink gracefully on a
                 // board with few enough squares that the middle is tight.
-                if (session.isMyTurn && !session.gameEnded)
+                if (!session.gameEnded)
                   Padding(
                     padding: const EdgeInsets.all(20),
                     child: FittedBox(
@@ -2039,6 +2070,7 @@ class _BoardSheet extends StatelessWidget {
                       child: _BoardCenterControls(
                         session: session,
                         pendingRollUi: pendingRollUi,
+                        endTurnLocked: endTurnLocked,
                       ),
                     ),
                   ),
@@ -2059,14 +2091,23 @@ class _BoardSheet extends StatelessWidget {
 /// [_AnimatedDice] shown there, right where the button was, since covering
 /// the board back up would defeat the point of moving these controls onto
 /// it in the first place.
+///
+/// Mounted for every player, not just whoever's turn it is: the roll/end
+/// buttons stay turn-gated, but everyone watching gets the same tumbling
+/// [_AnimatedDice] reveal for someone else's roll too (see
+/// [_BoardCenterControlsState._onSpectatedRoll]) — previously the board's
+/// middle just sat empty for onlookers while the roller alone saw it
+/// animate, and the only heads-up anyone else got was a plain text banner.
 class _BoardCenterControls extends StatefulWidget {
   const _BoardCenterControls({
     required this.session,
     required this.pendingRollUi,
+    required this.endTurnLocked,
   });
 
   final GameProvider session;
   final ValueNotifier<int> pendingRollUi;
+  final ValueNotifier<bool> endTurnLocked;
 
   @override
   State<_BoardCenterControls> createState() => _BoardCenterControlsState();
@@ -2083,6 +2124,34 @@ class _BoardCenterControlsState extends State<_BoardCenterControls> {
   /// seen before the button reappears.
   bool _showingResult = false;
 
+  StreamSubscription<DiceRoll>? _spectateSub;
+
+  @override
+  void initState() {
+    super.initState();
+    _spectateSub = widget.session.diceRolls.listen(_onSpectatedRoll);
+  }
+
+  @override
+  void dispose() {
+    _spectateSub?.cancel();
+    super.dispose();
+  }
+
+  /// Someone else's roll — this device never called [GameProvider.rollDice]
+  /// for it, so there's no request to await, just the result the server
+  /// already broadcast. Replays the same tumble timing the roller's own
+  /// [_roll] uses, purely for show, then settles and stays put — unlike
+  /// the roller's own reveal, there's no button underneath waiting to
+  /// reclaim this spot, so the dice just sit on the board showing the
+  /// last roll until the next one replaces them.
+  Future<void> _onSpectatedRoll(DiceRoll roll) async {
+    if (!mounted || roll.playerId == widget.session.myPlayerId) return;
+    setState(() => _rolling = true);
+    await Future<void>.delayed(_minRollAnimation);
+    if (mounted) setState(() => _rolling = false);
+  }
+
   Future<void> _roll(GameProvider session) async {
     if (_rolling) return;
     setState(() {
@@ -2098,17 +2167,38 @@ class _BoardCenterControlsState extends State<_BoardCenterControls> {
     if (mounted) setState(() => _showingResult = false);
   }
 
+  String _rollResultLabel(GameProvider session) {
+    final roll = session.lastRoll;
+    if (roll == null) return '';
+    final who = roll.playerId == session.myPlayerId
+        ? 'You'
+        : session.accountName(roll.playerId);
+    final prefix = session.isMyTurn ? '' : '$who — ';
+    return '${prefix}Rolled ${roll.total}${roll.isDouble ? ' — double!' : ''}';
+  }
+
   @override
   Widget build(BuildContext context) {
     final session = widget.session;
     final scheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
+    final isMyTurn = session.isMyTurn;
+
+    // Nobody's rolled yet and it isn't my turn: leave the board's middle
+    // empty, same as before. Once someone has, the settled dice stay put
+    // here — a real board doesn't tidy the dice away between turns either
+    // — updating (with the same tumble) whenever a new roll comes in.
+    if (!isMyTurn && !_rolling && session.lastRoll == null) {
+      return const SizedBox.shrink();
+    }
+
     // Once rolling starts (or it's already been rolled this turn, or the
     // result is still being held on screen — see _showingResult), the
     // button gives way to the dice themselves instead of sitting there
     // disabled — same reasoning as the "Game ended" banner replacing the
     // roll/end-turn row entirely rather than just graying it out.
-    final showRollButton = session.canRoll && !_rolling && !_showingResult;
+    final showRollButton =
+        isMyTurn && session.canRoll && !_rolling && !_showingResult;
 
     return Container(
       padding: const EdgeInsets.all(12),
@@ -2148,22 +2238,29 @@ class _BoardCenterControlsState extends State<_BoardCenterControls> {
             _AnimatedDice(rolling: _rolling, dieSize: 46, spacing: 10),
             const SizedBox(height: 6),
             Text(
-              _rolling
-                  ? 'Rolling…'
-                  : 'Rolled ${session.lastRoll?.total ?? ''}'
-                        '${session.lastRoll?.isDouble == true ? ' — double!' : ''}',
+              _rolling ? 'Rolling…' : _rollResultLabel(session),
+              textAlign: TextAlign.center,
               style: textTheme.labelMedium?.copyWith(
                 fontWeight: FontWeight.w700,
               ),
             ),
           ],
-          const SizedBox(height: 8),
-          FilledButton.tonalIcon(
-            style: FilledButton.styleFrom(minimumSize: const Size(150, 44)),
-            onPressed: session.canEndTurn ? session.endTurn : null,
-            icon: const Icon(Icons.skip_next_rounded),
-            label: const Text('End turn'),
-          ),
+          if (isMyTurn) ...[
+            const SizedBox(height: 8),
+            ValueListenableBuilder<bool>(
+              valueListenable: widget.endTurnLocked,
+              builder: (context, locked, _) => FilledButton.tonalIcon(
+                style: FilledButton.styleFrom(
+                  minimumSize: const Size(150, 44),
+                ),
+                onPressed: session.canEndTurn && !locked
+                    ? session.endTurn
+                    : null,
+                icon: const Icon(Icons.skip_next_rounded),
+                label: const Text('End turn'),
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -2503,6 +2600,15 @@ class _AnimatedDiceState extends State<_AnimatedDice>
 /// swap to the result.
 const _minRollAnimation = Duration(milliseconds: 700);
 
+/// How long End turn stays locked after my own roll lands (see
+/// [_GameScreenState._armEndTurnLock]). Comfortably longer than the board
+/// sheet's own 3s pause before auto-opening the landed property's sheet
+/// ([_GameScreenState._afterRollReveal]) — that pause alone isn't enough
+/// margin, and a landing with no property sheet to fall back on (a
+/// non-ownable square, or no curated layout at all) has nothing else
+/// standing between a stray tap and skipping the turn entirely.
+const _endTurnGrace = Duration(seconds: 6);
+
 /// Calls [GameProvider.rollDice], toggling [setRolling] around the request
 /// (padded out to [_minRollAnimation]) and surfacing a failure via a
 /// snackbar — shared by [_DiceSheetState] and [_BoardCenterControlsState]
@@ -2521,6 +2627,7 @@ Future<void> _performRoll(
   setRolling(false);
   if (!result.isOk && context.mounted) showSnack(context, result.error!);
 }
+
 
 /// Another player asked me for money — shown as a dialog so it reaches the
 /// player wherever they are in the app. Auto-closes when the request is
