@@ -14,7 +14,11 @@ jobs:
 
       - uses: subosito/flutter-action@v2
         with:
-          channel: stable
+          # Pinned to the version actually used for local dev — `channel:
+          # stable` floats forward over time and can fail CI on a newly
+          # deprecated API with no code change on our side. Bump
+          # deliberately when upgrading Flutter locally.
+          flutter-version: 3.41.5
           cache: true
 
       - run: flutter pub get
