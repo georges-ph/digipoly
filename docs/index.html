@@ -1,0 +1,552 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Digipoly — digital banking for physical board games</title>
+<meta name="description" content="Play Monopoly-style board games without the paper money. Keep your real board, dice and tokens on the table — everyone's phone becomes their wallet instead. No accounts, no internet, free and open source.">
+<link rel="icon" href="logo.png">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://georges-ph.github.io/digipoly/">
+<meta property="og:title" content="Digipoly — digital banking for physical board games">
+<meta property="og:description" content="Keep your real board, dice and tokens on the table — everyone's phone becomes their wallet instead. No accounts, no internet required.">
+<meta property="og:image" content="https://georges-ph.github.io/digipoly/screenshots/dashboard.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Digipoly — digital banking for physical board games">
+<meta name="twitter:description" content="Keep your real board, dice and tokens on the table — everyone's phone becomes their wallet instead.">
+<meta name="twitter:image" content="https://georges-ph.github.io/digipoly/screenshots/dashboard.png">
+<style>
+  /* Layout: dark fintech hero — glowing violet orb behind a phone mockup of the
+     real balance screen, a looping activity ticker demoing the send/request
+     feature. Feature cards mirror the app's own card radius. Everything below
+     is built from a single font family (Inter) at wide weight/size contrast,
+     matching the real app's own bundled typeface rather than inventing a
+     second display face. */
+  :root {
+    --bg: #f7f7fb;
+    --bg-elev: #ffffff;
+    --bg-sunken: #eef0f7;
+    --fg: #14161f;
+    --fg-muted: #6b6e85;
+    --border: #e2e3ee;
+    --accent: #5b52f0;
+    --accent-2: #8f7cf5;
+    --positive: #17a672;
+    --negative: #e0425c;
+    --radius: 22px;
+    --shadow: 0 20px 60px -25px rgba(20, 16, 60, 0.35);
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0b0d14;
+      --bg-elev: #13151f;
+      --bg-sunken: #0e1018;
+      --fg: #f5f6fa;
+      --fg-muted: #9397b0;
+      --border: #22242f;
+      --accent: #756bff;
+      --accent-2: #a294ff;
+      --positive: #34d399;
+      --negative: #fb7185;
+      --shadow: 0 30px 80px -30px rgba(0, 0, 0, 0.6);
+      color-scheme: dark;
+    }
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    padding-inline: 16px;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: inherit; text-decoration: none; }
+  img { display: block; max-width: 100%; }
+  h1, h2, h3 { margin: 0; text-wrap: balance; letter-spacing: -0.02em; }
+  p { margin: 0; }
+  .wrap { max-width: 1140px; margin-inline: auto; }
+  .eyebrow {
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+  .tabnum { font-variant-numeric: tabular-nums; }
+
+  /* ---- Nav ---- */
+  nav.top {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding-block: 16px;
+    background: color-mix(in srgb, var(--bg) 78%, transparent);
+    backdrop-filter: blur(14px);
+    border-bottom: 1px solid transparent;
+  }
+  nav.top.scrolled { border-bottom-color: var(--border); }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 17px; }
+  .brand img { width: 30px; height: 30px; border-radius: 9px; }
+  .navlinks { display: flex; align-items: center; gap: 26px; font-size: 14px; font-weight: 600; color: var(--fg-muted); }
+  .navlinks a:hover { color: var(--fg); }
+  .navcta { display: flex; align-items: center; gap: 10px; }
+  @media (max-width: 760px) { .navlinks { display: none; } }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 11px 20px;
+    border-radius: 999px;
+    font-weight: 700;
+    font-size: 14px;
+    border: 1px solid transparent;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .btn-primary {
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    color: #fff;
+    box-shadow: 0 12px 28px -10px color-mix(in srgb, var(--accent) 70%, transparent);
+  }
+  .btn-ghost { background: transparent; border-color: var(--border); color: var(--fg); }
+
+  /* ---- Hero ---- */
+  .hero {
+    position: relative;
+    display: grid;
+    grid-template-columns: 1.1fr 0.9fr;
+    gap: 40px;
+    align-items: center;
+    padding-block: 64px 40px;
+    overflow: clip;
+  }
+  @media (max-width: 900px) {
+    .hero { grid-template-columns: 1fr; padding-block: 36px 16px; }
+    .hero-visual { order: -1; }
+  }
+  .glow {
+    position: absolute;
+    width: 620px;
+    height: 620px;
+    right: -180px;
+    top: -160px;
+    background: radial-gradient(circle, color-mix(in srgb, var(--accent) 55%, transparent), transparent 70%);
+    filter: blur(10px);
+    animation: pulse 7s ease-in-out infinite;
+    pointer-events: none;
+    z-index: 0;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 0.55; transform: scale(1); }
+    50% { opacity: 0.85; transform: scale(1.06); }
+  }
+  @media (prefers-reduced-motion: reduce) { .glow { animation: none; } }
+
+  .hero-copy { position: relative; z-index: 1; display: flex; flex-direction: column; gap: 22px; }
+  .hero h1 { font-size: clamp(34px, 5vw, 56px); font-weight: 800; line-height: 1.05; }
+  .hero h1 em { font-style: normal; color: var(--accent); }
+  .hero-sub { font-size: 18px; color: var(--fg-muted); max-width: 46ch; line-height: 1.55; }
+  .hero-fine { font-size: 14px; color: var(--fg-muted); }
+  .hero-ctas { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 4px; }
+
+  .hero-visual { position: relative; z-index: 1; display: flex; justify-content: center; }
+  .phone {
+    position: relative;
+    width: min(280px, 72vw);
+    aspect-ratio: 9 / 19.5;
+    border-radius: 42px;
+    background: #05060a;
+    padding: 12px;
+    box-shadow: var(--shadow), 0 0 0 1px color-mix(in srgb, var(--fg) 8%, transparent);
+  }
+  .phone::before {
+    content: "";
+    position: absolute;
+    top: 22px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 70px;
+    height: 16px;
+    border-radius: 10px;
+    background: #05060a;
+    z-index: 2;
+    border: 1px solid #1c1e28;
+  }
+  .phone img { width: 100%; height: 100%; object-fit: cover; object-position: top; border-radius: 32px; }
+
+  .ticker-card {
+    position: absolute;
+    left: -34px;
+    bottom: 36px;
+    width: 232px;
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    box-shadow: var(--shadow);
+    padding: 12px;
+    overflow: hidden;
+    height: 118px;
+  }
+  @media (max-width: 900px) { .ticker-card { left: 50%; transform: translateX(-50%); bottom: -20px; } }
+  .ticker-title { font-size: 11px; font-weight: 700; color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 8px; }
+  .ticker-track { display: flex; flex-direction: column; gap: 10px; animation: scrollup 9s linear infinite; }
+  @media (prefers-reduced-motion: reduce) { .ticker-track { animation: none; } }
+  @keyframes scrollup {
+    0% { transform: translateY(0); }
+    100% { transform: translateY(-50%); }
+  }
+  .trow { display: flex; align-items: center; gap: 8px; font-size: 12.5px; }
+  .tdot { width: 22px; height: 22px; border-radius: 999px; background: var(--bg-sunken); display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; color: var(--accent); flex-shrink: 0; }
+  .tname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg); font-weight: 600; }
+  .tamt { font-weight: 700; }
+  .tamt.pos { color: var(--positive); }
+  .tamt.neg { color: var(--negative); }
+
+  /* ---- Sections ---- */
+  section { padding-block: 72px; position: relative; z-index: 1; }
+  .section-head { max-width: 640px; margin-bottom: 40px; display: flex; flex-direction: column; gap: 10px; }
+  .section-head h2 { font-size: clamp(26px, 3.4vw, 36px); font-weight: 800; }
+  .section-head p { color: var(--fg-muted); font-size: 16px; line-height: 1.6; }
+
+  /* How it works */
+  .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; }
+  @media (max-width: 800px) { .steps { grid-template-columns: 1fr; } }
+  .step { display: flex; flex-direction: column; gap: 10px; }
+  .step-num { font-size: 15px; font-weight: 800; color: var(--accent); }
+  .step h3 { font-size: 19px; font-weight: 700; }
+  .step p { color: var(--fg-muted); font-size: 15px; line-height: 1.6; }
+
+  /* Features */
+  .features { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 16px; }
+  .feature {
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 22px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .ficon {
+    width: 40px; height: 40px;
+    border-radius: 12px;
+    background: color-mix(in srgb, var(--accent) 14%, transparent);
+    display: flex; align-items: center; justify-content: center;
+    color: var(--accent);
+  }
+  .ficon svg { width: 20px; height: 20px; }
+  .feature h3 { font-size: 16px; font-weight: 700; }
+  .feature p { font-size: 14px; color: var(--fg-muted); line-height: 1.55; }
+
+  /* Screenshots */
+  .shots { display: flex; gap: 18px; overflow-x: auto; padding-bottom: 12px; scroll-snap-type: x mandatory; }
+  .shot { flex: 0 0 auto; width: 200px; scroll-snap-align: start; }
+  .shot .frame {
+    border-radius: 20px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    box-shadow: var(--shadow);
+    aspect-ratio: 9 / 18.5;
+  }
+  .shot img { width: 100%; height: 100%; object-fit: cover; }
+  .shot .frame.wide { aspect-ratio: 16/10; }
+  .shot.wide { width: 320px; }
+  .shot span { display: block; margin-top: 10px; font-size: 13px; color: var(--fg-muted); text-align: center; }
+
+  /* Download */
+  .downloads { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  @media (max-width: 800px) { .downloads { grid-template-columns: 1fr; } }
+  .dl {
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .dl h3 { font-size: 17px; font-weight: 700; }
+  .dl p { font-size: 14px; color: var(--fg-muted); line-height: 1.55; min-height: 62px; }
+  .dl .btn { margin-top: 6px; align-self: flex-start; }
+  .dl-meta { font-size: 12.5px; color: var(--fg-muted); }
+  .badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 12px; font-weight: 700; color: var(--fg-muted);
+    border: 1px solid var(--border); border-radius: 999px; padding: 6px 12px;
+    width: fit-content;
+  }
+  .badge strong { color: var(--fg); }
+
+  /* Community board card */
+  .board-card {
+    display: flex;
+    align-items: center;
+    gap: 22px;
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 26px;
+  }
+  @media (max-width: 700px) { .board-card { flex-direction: column; align-items: stretch; text-align: center; } }
+  .board-icon {
+    width: 56px; height: 56px; flex-shrink: 0;
+    border-radius: 16px;
+    background: color-mix(in srgb, var(--accent) 14%, transparent);
+    display: flex; align-items: center; justify-content: center;
+    color: var(--accent);
+  }
+  .board-icon svg { width: 28px; height: 28px; }
+  .board-info { flex: 1; display: flex; flex-direction: column; gap: 6px; }
+  .board-info h3 { font-size: 17px; font-weight: 700; }
+  .board-info p { font-size: 14px; color: var(--fg-muted); line-height: 1.55; }
+  .board-steps { font-size: 13px; }
+  .board-card .btn { flex-shrink: 0; }
+  @media (max-width: 700px) { .board-card .btn { align-self: center; } }
+
+  /* Footer */
+  footer { padding-block: 48px 40px; border-top: 1px solid var(--border); }
+  .foot-row { display: flex; justify-content: space-between; align-items: center; gap: 20px; flex-wrap: wrap; }
+  .foot-brand { display: flex; align-items: center; gap: 10px; font-weight: 800; }
+  .foot-brand img { width: 26px; height: 26px; border-radius: 8px; }
+  .footlinks { display: flex; gap: 20px; font-size: 14px; color: var(--fg-muted); flex-wrap: wrap; }
+  .footlinks a:hover { color: var(--fg); }
+  .fineprint { margin-top: 22px; font-size: 12.5px; color: var(--fg-muted); line-height: 1.6; }
+</style>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+</head>
+<body>
+
+<nav class="top" id="nav">
+  <div class="wrap" style="display:flex;align-items:center;justify-content:space-between;width:100%;">
+    <a class="brand" href="#top">
+      <img src="logo.png" alt="">
+      Digipoly
+    </a>
+    <div class="navlinks">
+      <a href="#how">How it works</a>
+      <a href="#features">Features</a>
+      <a href="#screenshots">Screenshots</a>
+      <a href="#boards">Boards</a>
+    </div>
+    <div class="navcta">
+      <a class="btn btn-ghost" href="https://github.com/georges-ph/digipoly" target="_blank" rel="noopener">GitHub</a>
+      <a class="btn btn-primary" href="#download">Get Digipoly</a>
+    </div>
+  </div>
+</nav>
+
+<div class="wrap" id="top">
+  <section class="hero" style="padding-top:20px;">
+    <div class="glow"></div>
+    <div class="hero-copy">
+      <span class="eyebrow">Open source · MIT licensed</span>
+      <h1>Your board game's <em>bank</em>, on every phone.</h1>
+      <p class="hero-sub">Keep your real board, dice and tokens on the table — everyone's
+        phone becomes their wallet instead. No accounts, no sign-up, no internet
+        required: it all runs over your own wifi, for as long as game night lasts.</p>
+      <div class="hero-ctas">
+        <a class="btn btn-primary" href="#download">Download Digipoly</a>
+        <a class="btn btn-ghost" href="#how">See how it works</a>
+      </div>
+      <p class="hero-fine">Windows · Android · iPhone (no install, join from a browser)</p>
+    </div>
+    <div class="hero-visual">
+      <div class="phone">
+        <img src="screenshots/game_screen.jpg" alt="Digipoly balance screen">
+      </div>
+      <div class="ticker-card" aria-hidden="true">
+        <div class="ticker-title">Activity</div>
+        <div class="ticker-track" id="ticker"></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="how">
+    <div class="section-head">
+      <span class="eyebrow">How it works</span>
+      <h2>Three steps, then just play.</h2>
+    </div>
+    <div class="steps">
+      <div class="step">
+        <span class="step-num">01</span>
+        <h3>Host</h3>
+        <p>Open Digipoly, tap Host, and pick or create a board — it just needs to
+          match what's on your table: properties, prices, currency.</p>
+      </div>
+      <div class="step">
+        <span class="step-num">02</span>
+        <h3>Join</h3>
+        <p>Everyone on the same wifi finds the room automatically, or scans the
+          QR code shown on the host's screen.</p>
+      </div>
+      <div class="step">
+        <span class="step-num">03</span>
+        <h3>Play</h3>
+        <p>Play the board game exactly as normal — just use the app any time
+          money would change hands.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="features">
+    <div class="section-head">
+      <span class="eyebrow">Features</span>
+      <h2>Everything a physical banker does — automatically.</h2>
+      <p>Built to feel like a real banking app, not a boardgame counter.</p>
+    </div>
+    <div class="features" id="features-grid"></div>
+  </section>
+
+  <section id="screenshots">
+    <div class="section-head">
+      <span class="eyebrow">Screenshots</span>
+      <h2>See it at the table.</h2>
+    </div>
+    <div class="shots" id="shots"></div>
+  </section>
+
+  <section id="download">
+    <div class="section-head">
+      <span class="eyebrow">Download</span>
+      <h2>Grab the latest release.</h2>
+      <p>All builds come from the <a href="https://github.com/georges-ph/digipoly/releases" target="_blank" rel="noopener" style="color:var(--accent);font-weight:700;">Releases page</a> — free, open source, no account required.</p>
+    </div>
+    <div class="downloads">
+      <div class="dl">
+        <span class="badge">Android · <strong>.apk</strong></span>
+        <h3>Android</h3>
+        <p>Download the APK and install it — you may need to allow "install
+          from unknown sources" once.</p>
+        <a class="btn btn-primary" href="https://github.com/georges-ph/digipoly/releases/latest/download/digipoly.apk">Download .apk</a>
+        <span class="dl-meta">~91.5 MB</span>
+      </div>
+      <div class="dl">
+        <span class="badge">Windows · <strong>.zip</strong></span>
+        <h3>Windows</h3>
+        <p>Download the zip, extract it anywhere, and run the .exe inside —
+          keep it together with the files next to it.</p>
+        <a class="btn btn-primary" href="https://github.com/georges-ph/digipoly/releases/latest/download/digipoly.zip">Download .zip</a>
+        <span class="dl-meta">~28.5 MB</span>
+      </div>
+      <div class="dl">
+        <span class="badge">iPhone · <strong>no install</strong></span>
+        <h3>iPhone</h3>
+        <p>No App Store build needed — whoever hosts can show a QR code that
+          opens Digipoly straight in Safari, no download required.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="boards">
+    <div class="section-head">
+      <span class="eyebrow">Community boards</span>
+      <h2>Don't have a board on hand?</h2>
+      <p>Boards are plain JSON — currency, properties, rents, Chance/Community
+        Chest cards — so they're easy to share. Here's one to start with.</p>
+    </div>
+    <div class="board-card">
+      <div class="board-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>
+        </svg>
+      </div>
+      <div class="board-info">
+        <h3>Lebanopoly</h3>
+        <p>The Lebanon-themed board used in the screenshots above — properties,
+          prices, currency, and both card decks all set up and ready to host.</p>
+        <p class="board-steps">Boards tab → <strong>+</strong> → Import from file, then pick the
+          downloaded file.</p>
+      </div>
+      <a class="btn btn-primary" href="https://github.com/georges-ph/digipoly/releases/download/v2.0.0/lebanopoly-board.json">Download board · .json</a>
+    </div>
+  </section>
+</div>
+
+<footer>
+  <div class="wrap">
+    <div class="foot-row">
+      <a class="foot-brand" href="#top"><img src="logo.png" alt="">Digipoly</a>
+      <div class="footlinks">
+        <a href="https://github.com/georges-ph/digipoly" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://github.com/georges-ph/digipoly/releases" target="_blank" rel="noopener">Releases</a>
+        <a href="https://github.com/georges-ph/digipoly/blob/main/LICENSE" target="_blank" rel="noopener">MIT License</a>
+        <a href="https://github.com/georges-ph/digipoly/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener">Contributing</a>
+      </div>
+    </div>
+    <p class="fineprint">Digipoly is an independent, fan-made project for playing
+      Monopoly-style board games with physical boards and pieces. It isn't
+      affiliated with or endorsed by Hasbro.</p>
+  </div>
+</footer>
+
+<script>
+(function () {
+  var icons = {
+    bank: '<rect x="2" y="6" width="20" height="14" rx="3"/><line x1="2" y1="11" x2="22" y2="11"/><line x1="6" y1="16" x2="10" y2="16"/>',
+    house: '<path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/><rect x="10" y="14" width="4" height="6"/>',
+    grid: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
+    gavel: '<rect x="12.5" y="3" width="8" height="4.2" rx="1.2"/><line x1="14.5" y1="7.2" x2="8.5" y2="13.2"/><line x1="4" y1="20.5" x2="12" y2="20.5"/><line x1="6" y1="16.5" x2="10" y2="20.5"/>',
+    monitor: '<rect x="3" y="4" width="18" height="12" rx="2"/><line x1="8" y1="20" x2="16" y2="20"/><line x1="12" y1="16" x2="12" y2="20"/>',
+    nfc: '<path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><circle cx="12" cy="20" r="1" fill="currentColor" stroke="none"/>',
+    shield: '<path d="M12 2 20 5 20 12 12 21 4 12 4 5 Z"/><path d="M8 12l2.5 2.5L16 9"/>',
+    editor: '<polygon points="3,21 3,17 15,5 19,9 7,21"/><polygon points="15,5 17,3 21,7 19,9"/>'
+  };
+  function svg(name) {
+    return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">' + icons[name] + '</svg>';
+  }
+  var features = [
+    ['bank', 'Banking', 'Send money, collect from the bank, get paid for passing GO, or request money from another player — they approve it on their own phone.'],
+    ['house', 'Properties', 'Buy, build houses and hotels, and pay rent — the app works out the right amount automatically.'],
+    ['grid', 'Board view', 'No physical board? See everyone’s token move around a live layout, right on your screen.'],
+    ['gavel', 'Live auctions', 'Decline to buy and the table can bid on it live, with a closing countdown so bids never get cut off.'],
+    ['monitor', 'Dashboard', 'Put the game up on a TV or laptop so the whole table can see balances and the board at a glance.'],
+    ['nfc', 'NFC cards', 'On Android, tap a physical card to buy a property or pay rent — like a real contactless terminal.'],
+    ['shield', 'Resilient', 'Lose wifi or your phone dies? Your seat and balance are still there when you reconnect — even after restarting the app.'],
+    ['editor', 'Board editor', 'Build your own board — currency, properties, rents, Chance/Community Chest cards — and reuse it every game night.']
+  ];
+  document.getElementById('features-grid').innerHTML = features.map(function (f) {
+    return '<div class="feature"><div class="ficon">' + svg(f[0]) + '</div><h3>' + f[1] + '</h3><p>' + f[2] + '</p></div>';
+  }).join('');
+
+  var shots = [
+    ['game_screen.jpg', 'Balance & activity'],
+    ['board_view.jpg', 'Board view'],
+    ['send_money.jpg', 'Send money'],
+    ['property_sheet.jpg', 'Property sheet'],
+    ['join_game.jpg', 'Join a room'],
+    ['live_auction.jpg', 'Live auction']
+  ];
+  document.getElementById('shots').innerHTML = shots.map(function (s) {
+    return '<div class="shot"><div class="frame"><img src="screenshots/' + s[0] + '" alt="' + s[1] + '" loading="lazy"></div><span>' + s[1] + '</span></div>';
+  }).join('') + '<div class="shot wide"><div class="frame wide"><img src="screenshots/dashboard.png" alt="Dashboard" loading="lazy"></div><span>Dashboard</span></div>';
+
+  var rows = [
+    ['S', 'Sam paid rent', '+$140', 'pos'],
+    ['Y', 'You collected GO salary', '+$200', 'pos'],
+    ['A', 'Alex bought Boardwalk', '−$400', 'neg'],
+    ['J', 'Jordan requested $50', '+$50', 'pos']
+  ];
+  var track = rows.concat(rows).map(function (r) {
+    return '<div class="trow"><div class="tdot">' + r[0] + '</div><div class="tname">' + r[1] + '</div><div class="tamt tabnum ' + r[3] + '">' + r[2] + '</div></div>';
+  }).join('');
+  document.getElementById('ticker').innerHTML = track;
+
+  var nav = document.getElementById('nav');
+  window.addEventListener('scroll', function () {
+    nav.classList.toggle('scrolled', window.scrollY > 8);
+  }, { passive: true });
+})();
+</script>
+</body>
+</html>
