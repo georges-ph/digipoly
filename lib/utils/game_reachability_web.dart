@@ -1,3 +1,6 @@
+// ignore_for_file: deprecated_member_use, avoid_web_libraries_in_flutter
+// dart:html is still the simplest way to issue a same-origin XHR; migrating
+// to package:web/dart:js_interop is a bigger change than this util warrants.
 import 'dart:convert';
 import 'dart:html' as html;
 

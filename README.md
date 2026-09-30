@@ -1,5 +1,8 @@
 # Digipoly
 
+[![CI](https://github.com/georges-ph/digipoly/actions/workflows/ci.yml/badge.svg)](https://github.com/georges-ph/digipoly/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 **Play Monopoly-style board games without the paper money.** Keep your real
 board, dice and tokens on the table — everyone's phone becomes their wallet
 instead. Don't have a board on hand? Boards with a full layout render right
@@ -107,7 +110,8 @@ flutter build apk             # rebuild so the asset ships
 
 See [PROJECT.md](PROJECT.md) for the full architecture, protocol, and game
 rules reference, and [CLAUDE.md](CLAUDE.md) for the conventions given to the
-AI assistant that helped write the code.
+AI assistant that helped write the code. See [CONTRIBUTING.md](CONTRIBUTING.md)
+before opening a PR.
 
 ## About this project
 
